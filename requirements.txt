@@ -2,5 +2,7 @@ streamlit
 openai
 llama-index
 llama-index-llms-openai
+llama-index-readers-github
 nltk
 pypdf
+lark-oapi
