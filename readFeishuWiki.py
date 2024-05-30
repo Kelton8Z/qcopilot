@@ -6,21 +6,89 @@ from llama_index.core import download_loader
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
+import streamlit as st
 
-app_id = os.environ['APPID']
-app_secret = os.environ['APPSECRET']
-node_id = os.environ['NODEID']
-doc_id = os.environ['DOCID'] 
-FeishuWikiReader = download_loader("FeishuWikiReader")
-FeishuWikiReader.wiki_spaces_url_path = "/open-apis/wiki/v2/spaces/{}/nodes"
-loader = FeishuWikiReader(app_id, app_secret)
 
-user_access_token = os.environ['USERACCESSTOKEN']
-def readWiki(space_id):
-    client = lark.Client.builder() \
+app_id = st.secrets.feishu_app_id
+app_secret = st.secrets.feishu_app_secret
+# node_id = os.environ['NODEID']
+# doc_id = os.environ['DOCID'] 
+# FeishuWikiReader = download_loader("FeishuWikiReader")
+# FeishuWikiReader.wiki_spaces_url_path = "/open-apis/wiki/v2/spaces/{}/nodes"
+# loader = FeishuWikiReader(app_id, app_secret)
+
+client = lark.Client.builder() \
         .enable_set_token(True) \
         .log_level(lark.LogLevel.DEBUG) \
+        .app_id(app_id) \
+        .app_secret(app_secret) \
         .build()
+
+def getAppAccessToken(app_id, app_secret):
+    # 构造请求对象
+    request: InternalAppAccessTokenRequest = InternalAppAccessTokenRequest.builder() \
+        .request_body(InternalAppAccessTokenRequestBody.builder()
+            .app_id(app_id)
+            .app_secret(app_secret)
+            .build()) \
+        .build()
+
+    # 发起请求
+    response: InternalAppAccessTokenResponse = client.auth.v3.app_access_token.internal(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.auth.v3.app_access_token.internal failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        return
+
+    # 处理业务结果
+    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    return response.data["app_access_token"]
+
+def getOAuthCode(app_id, redirect_url):
+    url = f"https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={app_id}&redirect_uri={redirect_url}"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    response = requests.get(url, headers)
+    if response.status_code == 200:
+        return response.data["code"]
+    else:
+        print("Failed to get oauth code. Status code:", response.status_code)
+
+
+def getUserAccessToken(oauth_code):
+    # 构造请求对象
+    request: CreateOidcAccessTokenRequest = CreateOidcAccessTokenRequest.builder() \
+        .request_body(CreateOidcAccessTokenRequestBody.builder()
+            .grant_type("authorization_code")
+            .code(oauth_code)
+            .build()) \
+        .build()
+
+    # 发起请求
+    response: CreateOidcAccessTokenResponse = client.authen.v1.oidc_access_token.create(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.authen.v1.oidc_access_token.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        return
+
+    # 处理业务结果
+    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    return response.data["access_token"]
+
+# get oauth code to get user access token
+redirect_url = "https://open.feishu.cn/api-explorer/cli_a6df1d71d5f2d00d"
+# app_access_token = getAppAccessToken(app_id, app_secret)
+oauth_code = getOAuthCode(app_id, redirect_url)
+user_access_token = getUserAccessToken(oauth_code)
+
+def readWiki(space_id):
 
     # 构造请求对象
     request: ListSpaceNodeRequest = ListSpaceNodeRequest.builder() \
