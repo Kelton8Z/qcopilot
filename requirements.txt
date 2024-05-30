@@ -5,4 +5,5 @@ llama-index-llms-openai
 llama-index-readers-github
 nltk
 pypdf
+requests
 lark-oapi
