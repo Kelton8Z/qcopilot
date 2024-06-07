@@ -138,10 +138,11 @@ def readWiki(space_id, app_id, app_secret):
     # response: SearchWikiResponse = client.wiki.v2.space_node.search(request, option)
 
     docIDs = [item.obj_token for item in response.data.items]
+    docTitles = [item.title for item in response.data.items]
 
     # read docs
 
-    for doc_id in docIDs:
+    for doc_id, title in zip(docIDs, docTitles):
 
         # 构造请求对象
         request: GetDocumentRequest = GetDocumentRequest.builder() \
@@ -150,18 +151,18 @@ def readWiki(space_id, app_id, app_secret):
 
         # 发起请求
         option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
-        response: GetDocumentResponse = client.docx.v1.document.get(request, option)
+        # response: GetDocumentResponse = client.docx.v1.document.get(request, option)
 
-        # 处理失败返回
-        if not response.success():
-            lark.logger.error(
-                f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-            return
+        # # 处理失败返回
+        # if not response.success():
+        #     lark.logger.error(
+        #         f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        #     return
 
-        # 处理业务结果
-        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+        # # 处理业务结果
+        # lark.logger.info(lark.JSON.marshal(response.data, indent=4))
 
-        title = response.data.document.title
+        # title = response.data.document.title
         # doc_id = response.data.document.id
 
         request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
@@ -171,8 +172,12 @@ def readWiki(space_id, app_id, app_secret):
 
         # 发起请求
         response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
-        with open("./data/"+title, 'w') as f:
-            f.write(response.data.content)
+        if not response.success():
+            lark.logger.error(
+                f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        else:
+            with open("./data/"+title, 'w') as f:
+                f.write(response.data.content)
         
     
 
