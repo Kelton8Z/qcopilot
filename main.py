@@ -21,7 +21,7 @@ try:
 except ImportError:
   from llama_index.core import VectorStoreIndex, ServiceContext, Document, SimpleDirectoryReader
 
-# from readFeishuWiki import readWiki
+from readFeishuWiki import readWiki
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 space_id = st.secrets.feishu_space_id
@@ -32,9 +32,9 @@ client = lark.Client.builder() \
         .app_secret(app_secret) \
         .build()
 
+'''
 def readWiki(space_id, app_id, app_secret):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
-    doc_id = os.environ['DOCID'] 
 
     # read doc
     client = lark.Client.builder() \
@@ -71,27 +71,7 @@ def readWiki(space_id, app_id, app_secret):
     response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
     with open("./data/"+title, 'w') as f:
         f.write(response.data.content)
-    
-def getTenantAccessToken(app_id, app_secret):
-    request: InternalTenantAccessTokenRequest = InternalTenantAccessTokenRequest.builder() \
-        .request_body(InternalTenantAccessTokenRequestBody.builder()
-            .app_id(app_id)
-            .app_secret(app_secret)
-            .build()) \
-        .build()
-
-    # 发起请求
-    response: InternalTenantAccessTokenResponse = client.auth.v3.tenant_access_token.internal(request)
-
-    # 处理失败返回
-    if not response.success():
-        lark.logger.error(
-            f"client.auth.v3.tenant_access_token.internal failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        return
-
-    # 处理业务结果
-    lark.logger.info(lark.JSON.marshal(response, indent=4))
-    return json.loads(response.raw.content)["tenant_access_token"]
+'''
 
 title = "AI assistant, powered by Qingcheng knowledge"
 prompt = "You are an expert AI engineer in our company Qingcheng and your job is to answer technical questions. Keep your answers technical and based on facts – do not hallucinate features."
@@ -136,7 +116,7 @@ def load_data():
 index = load_data()
 
 if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
-        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
+    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
 
 prompt = st.chat_input("Your question")
 if prompt: # Prompt for user input and save to chat history

@@ -2,17 +2,17 @@ import os
 import requests
 import json
 # from llama_index.readers.download import download_loader
-from llama_index.core import download_loader
+# from llama_index.core import download_loader
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
+from lark_oapi.api.auth.v3 import *
 import streamlit as st
 
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 # node_id = os.environ['NODEID']
-# doc_id = os.environ['DOCID'] 
 # FeishuWikiReader = download_loader("FeishuWikiReader")
 # FeishuWikiReader.wiki_spaces_url_path = "/open-apis/wiki/v2/spaces/{}/nodes"
 # loader = FeishuWikiReader(app_id, app_secret)
@@ -58,6 +58,26 @@ def getOAuthCode(app_id, redirect_url):
     else:
         print("Failed to get oauth code. Status code:", response.status_code)
 
+def getTenantAccessToken(app_id, app_secret):
+    request: InternalTenantAccessTokenRequest = InternalTenantAccessTokenRequest.builder() \
+        .request_body(InternalTenantAccessTokenRequestBody.builder()
+            .app_id(app_id)
+            .app_secret(app_secret)
+            .build()) \
+        .build()
+
+    # 发起请求
+    response: InternalTenantAccessTokenResponse = client.auth.v3.tenant_access_token.internal(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.auth.v3.tenant_access_token.internal failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        return
+
+    # 处理业务结果
+    lark.logger.info(lark.JSON.marshal(response, indent=4))
+    return json.loads(response.raw.content)["tenant_access_token"]
 
 def getUserAccessToken(oauth_code):
     # 构造请求对象
@@ -85,19 +105,19 @@ def getUserAccessToken(oauth_code):
 # get oauth code to get user access token
 redirect_url = "https://open.feishu.cn/api-explorer/cli_a6df1d71d5f2d00d"
 # app_access_token = getAppAccessToken(app_id, app_secret)
-oauth_code = getOAuthCode(app_id, redirect_url)
-user_access_token = getUserAccessToken(oauth_code)
+# oauth_code = getOAuthCode(app_id, redirect_url)
+# user_access_token = getUserAccessToken(oauth_code)
 
-def readWiki(space_id):
+def readWiki(space_id, app_id, app_secret):
+    tenant_access_token = getTenantAccessToken(app_id, app_secret)
 
-    # 构造请求对象
+    # list wiki docs
     request: ListSpaceNodeRequest = ListSpaceNodeRequest.builder() \
         .space_id(space_id) \
         .build()
 
     # 发起请求
-    option = lark.RequestOption.builder().user_access_token(user_access_token).build()
-    response: ListSpaceNodeResponse = client.wiki.v2.space_node.list(request, option)
+    response: ListSpaceNodeResponse = client.wiki.v2.space_node.list(request)
 
     # 处理失败返回
     if not response.success():
@@ -117,42 +137,43 @@ def readWiki(space_id):
     #     .build()
     # response: SearchWikiResponse = client.wiki.v2.space_node.search(request, option)
 
-    # read doc
-    client = lark.Client.builder() \
-        .enable_set_token(True) \
-        .log_level(lark.LogLevel.DEBUG) \
-        .build()
+    docIDs = [item.obj_token for item in response.data.items]
 
-    # 构造请求对象
-    request: GetDocumentRequest = GetDocumentRequest.builder() \
-        .document_id(doc_id) \
-        .build()
+    # read docs
 
-    # 发起请求
-    option = lark.RequestOption.builder().user_access_token(user_access_token).build()
-    response: GetDocumentResponse = client.docx.v1.document.get(request, option)
+    for doc_id in docIDs:
 
-    # 处理失败返回
-    if not response.success():
-        lark.logger.error(
-            f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        return
+        # 构造请求对象
+        request: GetDocumentRequest = GetDocumentRequest.builder() \
+            .document_id(doc_id) \
+            .build()
 
-    # 处理业务结果
-    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+        # 发起请求
+        option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
+        response: GetDocumentResponse = client.docx.v1.document.get(request, option)
 
-    title = response.data.document.title
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+            return
 
-    request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
-        .document_id(doc_id) \
-        .lang(0) \
-        .build()
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
 
-    # 发起请求
-    response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
-    with open("./data/"+title, 'w') as f:
-        f.write(response.data.content)
-    
+        title = response.data.document.title
+        # doc_id = response.data.document.id
+
+        request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
+            .document_id(doc_id) \
+            .lang(0) \
+            .build()
+
+        # 发起请求
+        response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
+        with open("./data/"+title, 'w') as f:
+            f.write(response.data.content)
+        
     
 
     # # 处理失败返回
