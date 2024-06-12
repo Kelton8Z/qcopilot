@@ -138,6 +138,7 @@ def readWiki(space_id, app_id, app_secret):
     # response: SearchWikiResponse = client.wiki.v2.space_node.search(request, option)
 
     docIDs = [item.obj_token for item in response.data.items]
+    # print(f'DOC IDs: {docIDs}')
     docTitles = [item.title for item in response.data.items]
 
     # read docs
@@ -178,6 +179,23 @@ def readWiki(space_id, app_id, app_secret):
         else:
             with open("./data/"+title, 'w') as f:
                 f.write(response.data.content)
+
+        request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
+        .document_id(doc_id) \
+        .page_size(500) \
+        .document_revision_id(-1) \
+        .build()
+
+        # 发起请求
+        response: ListDocumentBlockResponse = client.docx.v1.document_block.list(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.docx.v1.document_block.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
         
     
 

@@ -22,6 +22,9 @@ except ImportError:
   from llama_index.core import VectorStoreIndex, ServiceContext, Document, SimpleDirectoryReader
 
 from readFeishuWiki import readWiki
+title = "AI assistant, powered by Qingcheng knowledge"
+st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
+
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 space_id = st.secrets.feishu_space_id
@@ -32,56 +35,14 @@ client = lark.Client.builder() \
         .app_secret(app_secret) \
         .build()
 
-'''
-def readWiki(space_id, app_id, app_secret):
-    tenant_access_token = getTenantAccessToken(app_id, app_secret)
-
-    # read doc
-    client = lark.Client.builder() \
-        .enable_set_token(True) \
-        .log_level(lark.LogLevel.DEBUG) \
-        .build()
-
-    # 构造请求对象
-    request: GetDocumentRequest = GetDocumentRequest.builder() \
-        .document_id(doc_id) \
-        .build()
-
-    # 发起请求
-    option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
-    response: GetDocumentResponse = client.docx.v1.document.get(request, option)
-
-    # 处理失败返回
-    if not response.success():
-        lark.logger.error(
-            f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        return
-
-    # 处理业务结果
-    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
-
-    title = response.data.document.title
-
-    request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
-        .document_id(doc_id) \
-        .lang(0) \
-        .build()
-
-    # 发起请求
-    response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
-    with open("./data/"+title, 'w') as f:
-        f.write(response.data.content)
-'''
-
-title = "AI assistant, powered by Qingcheng knowledge"
 prompt = "You are an expert AI engineer in our company Qingcheng and your job is to answer technical questions. Keep your answers technical and based on facts – do not hallucinate features."
-st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 openai.api_key = st.secrets.openai_key
 
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
 os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 
 llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"), 
+           "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
@@ -104,7 +65,7 @@ def load_data():
             os.makedirs(directory)
         reader = SimpleDirectoryReader(input_dir=directory, recursive=True)
         docs = reader.load_data()
-        Settings.llm = llm_map["ollama"]
+        Settings.llm = llm_map["gpt4o"]
         embed_model = JinaEmbedding(
             api_key=st.secrets.jinaai_key,
             model="jina-embeddings-v2-base-en",
