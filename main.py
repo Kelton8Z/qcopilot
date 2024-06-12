@@ -54,6 +54,14 @@ if "messages" not in st.session_state.keys(): # Initialize the chat messages his
         {"role": "assistant", "content": "Ask me a question!"}
     ]
 
+from llama_index.core.readers.base import BaseReader
+import pandas as pd
+
+class ExcelReader(BaseReader):
+    def load_data(self, file_path: str, extra_info: dict = None):
+        data = pd.read_excel(file_path).to_string()
+        return [Document(text=data, metadata=extra_info)]
+
 @st.cache_resource(show_spinner=False)
 def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
@@ -63,8 +71,9 @@ def load_data():
         if not os.path.exists(directory):
             os.makedirs(directory)
         readWiki(space_id, app_id, app_secret)
-        reader = SimpleDirectoryReader(input_dir=directory, recursive=True)
+        reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
         docs = reader.load_data()
+        # print(f'LLAMA DOCS: {docs}')
         Settings.llm = llm_map["gpt4o"]
         embed_model = JinaEmbedding(
             api_key=st.secrets.jinaai_key,
