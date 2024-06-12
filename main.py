@@ -59,10 +59,10 @@ def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
-        readWiki(space_id, app_id, app_secret)
         directory = "./data"
         if not os.path.exists(directory):
             os.makedirs(directory)
+        readWiki(space_id, app_id, app_secret)
         reader = SimpleDirectoryReader(input_dir=directory, recursive=True)
         docs = reader.load_data()
         Settings.llm = llm_map["gpt4o"]
