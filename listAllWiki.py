@@ -69,12 +69,14 @@ async def get_wiki_child_nodes(space_id, parent_node_token, headers):
 
     while has_more and (page_token is None or page_token.strip()):
         paged_result = await get_wiki_node_list(space_id, headers, page_token, parent_node_token)
-        child_nodes.extend(paged_result['items'])
+        # child_nodes.extend(paged_result['items'])
 
         for item in paged_result['items']:
             if item['has_child']:
                 grand_child_nodes = await get_wiki_child_nodes(space_id, item['node_token'], headers)
                 child_nodes.extend(grand_child_nodes)
+            else:
+                child_nodes.append(item)
 
         page_token = paged_result['page_token']
         has_more = paged_result['has_more']
