@@ -114,9 +114,9 @@ async def readWiki(space_id, app_id, app_secret):
         doc_type = node["obj_type"]
         
         # 构造请求对象
-        request: GetDocumentRequest = GetDocumentRequest.builder() \
-            .document_id(doc_id) \
-            .build()
+        # request: GetDocumentRequest = GetDocumentRequest.builder() \
+        #     .document_id(doc_id) \
+        #     .build()
 
         # 发起请求
         option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
@@ -134,23 +134,25 @@ async def readWiki(space_id, app_id, app_secret):
         # title = response.data.document.title
         # doc_id = response.data.document.id
 
-        request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
-            .document_id(doc_id) \
-            .lang(0) \
-            .build()
-
-        # 发起请求
-        response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
-        if not response.success():
-            lark.logger.error(
-                f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        else:
-            with open("./data/"+title, 'w') as f:
-                f.write(response.data.content)
+        
 
         if doc_type=="sheet":
             pass
         elif doc_type=="docx":
+            request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
+            .document_id(doc_id) \
+            .lang(0) \
+            .build()
+
+            # 发起请求
+            response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
+            if not response.success():
+                lark.logger.error(
+                    f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
+            else:
+                with open("./data/"+title, 'w') as f:
+                    f.write(response.data.content)
+                    
             request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
             .document_id(doc_id) \
             .page_size(500) \
