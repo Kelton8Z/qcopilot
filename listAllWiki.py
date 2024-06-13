@@ -83,9 +83,9 @@ async def get_wiki_child_nodes(space_id, parent_node_token, headers):
 
     return child_nodes
 
-async def main():
-    space_id = os.environ["SPACE_ID"]
-    nodes = await get_all_wiki_nodes(space_id)
-    print(nodes)
+# async def main():
+#     space_id = os.environ["SPACE_ID"]
+#     nodes = await get_all_wiki_nodes(space_id)
+#     print(nodes)
 
 # asyncio.run(main())
