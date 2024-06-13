@@ -1,7 +1,5 @@
 import os
 import asyncio
-# from llama_index.readers.download import download_loader
-# from llama_index.core import download_loader
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
@@ -12,13 +10,7 @@ import anthropic
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
-from llama_index.embeddings.jinaai import JinaEmbedding
 from llama_index.core import Settings
-
-try:
-  from llama_index import VectorStoreIndex, ServiceContext, Document, SimpleDirectoryReader
-except ImportError:
-  from llama_index.core import VectorStoreIndex, ServiceContext, Document, SimpleDirectoryReader
 
 from readFeishuWiki import readWiki
 title = "AI assistant, powered by Qingcheng knowledge"
@@ -53,37 +45,18 @@ if "messages" not in st.session_state.keys(): # Initialize the chat messages his
         {"role": "assistant", "content": "Ask me a question!"}
     ]
 
-from llama_index.core.readers.base import BaseReader
-import pandas as pd
-
-class ExcelReader(BaseReader):
-    def load_data(self, file_path: str, extra_info: dict = None):
-        data = pd.read_excel(file_path).to_string()
-        return [Document(text=data, metadata=extra_info)]
-
 @st.cache_resource(show_spinner=False)
 def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
-        directory = "./data"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
         # recursively read wiki and write each file into the machine
-        asyncio.run(readWiki(space_id, app_id, app_secret))
-        reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
-        docs = reader.load_data()
-        # print(f'LLAMA DOCS: {docs}')
-        Settings.llm = llm_map["gpt4o"]
-        embed_model = JinaEmbedding(
-            api_key=st.secrets.jinaai_key,
-            model="jina-embeddings-v2-base-en",
-            embed_batch_size=16,
-        )
-        index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+        index = asyncio.run(readWiki(space_id, app_id, app_secret))
+        
         return index
     
 def main():
+    Settings.llm = llm_map["gpt4o"]
     index = load_data()
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine

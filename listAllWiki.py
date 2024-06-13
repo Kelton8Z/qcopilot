@@ -69,8 +69,6 @@ async def get_wiki_child_nodes(space_id, parent_node_token, headers):
 
     while has_more and (page_token is None or page_token.strip()):
         paged_result = await get_wiki_node_list(space_id, headers, page_token, parent_node_token)
-        # child_nodes.extend(paged_result['items'])
-
         for item in paged_result['items']:
             if item['has_child']:
                 grand_child_nodes = await get_wiki_child_nodes(space_id, item['node_token'], headers)
@@ -82,10 +80,3 @@ async def get_wiki_child_nodes(space_id, parent_node_token, headers):
         has_more = paged_result['has_more']
 
     return child_nodes
-
-# async def main():
-#     space_id = os.environ["SPACE_ID"]
-#     nodes = await get_all_wiki_nodes(space_id)
-#     print(nodes)
-
-# asyncio.run(main())

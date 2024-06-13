@@ -1,14 +1,22 @@
 import os 
 import requests
 import json
-# from llama_index.readers.download import download_loader
-# from llama_index.core import download_loader
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
 from listAllWiki import *
+
+from llama_index.embeddings.jinaai import JinaEmbedding
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+from llama_index.core.readers.base import BaseReader
+import pandas as pd
+
+class ExcelReader(BaseReader):
+    def load_data(self, file_path: str, extra_info: dict = None):
+        data = pd.read_excel(file_path).to_string()
+        return [Document(text=data, metadata=extra_info)]
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
@@ -152,7 +160,7 @@ async def readWiki(space_id, app_id, app_secret):
             else:
                 with open("./data/"+title, 'w') as f:
                     f.write(response.data.content)
-                    
+
             request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
             .document_id(doc_id) \
             .page_size(500) \
@@ -170,7 +178,21 @@ async def readWiki(space_id, app_id, app_secret):
                 # 处理业务结果
                 lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
         
-        
+    directory = "./data"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
+    docs = reader.load_data()
+    
+
+    embed_model = JinaEmbedding(
+        api_key=st.secrets.jinaai_key,
+        model="jina-embeddings-v2-base-en",
+        embed_batch_size=16,
+    )
+    index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+    return index
 
     # # 处理失败返回
     # if not response.success():
