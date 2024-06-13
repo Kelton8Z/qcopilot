@@ -62,7 +62,7 @@ class ExcelReader(BaseReader):
         return [Document(text=data, metadata=extra_info)]
 
 @st.cache_resource(show_spinner=False)
-async def load_data():
+def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
@@ -70,7 +70,7 @@ async def load_data():
         if not os.path.exists(directory):
             os.makedirs(directory)
         # recursively read wiki and write each file into the machine
-        await readWiki(space_id, app_id, app_secret)
+        asyncio.run(readWiki(space_id, app_id, app_secret))
         reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
         docs = reader.load_data()
         # print(f'LLAMA DOCS: {docs}')
@@ -83,8 +83,8 @@ async def load_data():
         index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
         return index
     
-async def main():
-    index = await load_data()
+def main():
+    index = load_data()
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
         st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
@@ -106,4 +106,4 @@ async def main():
                 message = {"role": "assistant", "content": response.response}
                 st.session_state.messages.append(message) # Add response to message history
 
-asyncio.run(main())
+main()
