@@ -10,3 +10,4 @@ nltk
 pypdf
 requests
 lark-oapi
+docx2txt
