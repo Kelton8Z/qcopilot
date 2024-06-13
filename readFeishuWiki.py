@@ -115,6 +115,9 @@ redirect_url = "https://open.feishu.cn/api-explorer/cli_a6df1d71d5f2d00d"
 async def readWiki(space_id, app_id, app_secret):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
     nodes = await get_all_wiki_nodes(space_id, tenant_access_token)
+    directory = "./data"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
     print(nodes)
     for node in nodes:
         doc_id = node["obj_token"]
@@ -141,8 +144,6 @@ async def readWiki(space_id, app_id, app_secret):
 
         # title = response.data.document.title
         # doc_id = response.data.document.id
-
-        
 
         if doc_type=="sheet":
             pass
@@ -177,11 +178,7 @@ async def readWiki(space_id, app_id, app_secret):
             else:
                 # 处理业务结果
                 lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
-        
-    directory = "./data"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    
+            
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
     
