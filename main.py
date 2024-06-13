@@ -1,6 +1,5 @@
 import os
-import requests
-import json
+import asyncio
 # from llama_index.readers.download import download_loader
 # from llama_index.core import download_loader
 import lark_oapi as lark
@@ -63,14 +62,15 @@ class ExcelReader(BaseReader):
         return [Document(text=data, metadata=extra_info)]
 
 @st.cache_resource(show_spinner=False)
-def load_data():
+async def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
         directory = "./data"
         if not os.path.exists(directory):
             os.makedirs(directory)
-        readWiki(space_id, app_id, app_secret)
+        # recursively read wiki and write each file into the machine
+        await readWiki(space_id, app_id, app_secret)
         reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
         docs = reader.load_data()
         # print(f'LLAMA DOCS: {docs}')
@@ -82,27 +82,28 @@ def load_data():
         )
         index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
         return index
+    
+async def main():
+    index = await load_data()
 
-index = load_data()
+    if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
+        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
 
-if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
-    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
+    prompt = st.chat_input("Your question")
+    if prompt: # Prompt for user input and save to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
-prompt = st.chat_input("Your question")
-if prompt: # Prompt for user input and save to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    for message in st.session_state.messages: # Display the prior chat messages
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
 
-for message in st.session_state.messages: # Display the prior chat messages
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+    # If last message is not from assistant, generate a new response
+    if st.session_state.messages[-1]["role"] != "assistant":
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = st.session_state.chat_engine.chat(prompt)
+                st.write(response.response)
+                message = {"role": "assistant", "content": response.response}
+                st.session_state.messages.append(message) # Add response to message history
 
-# If last message is not from assistant, generate a new response
-if st.session_state.messages[-1]["role"] != "assistant":
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = st.session_state.chat_engine.chat(prompt)
-            st.write(response.response)
-            message = {"role": "assistant", "content": response.response}
-            st.session_state.messages.append(message) # Add response to message history
-
-
+asyncio.run(main())

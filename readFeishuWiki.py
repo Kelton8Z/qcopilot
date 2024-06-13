@@ -8,14 +8,10 @@ from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
-
+from listAllWiki import *
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
-# node_id = os.environ['NODEID']
-# FeishuWikiReader = download_loader("FeishuWikiReader")
-# FeishuWikiReader.wiki_spaces_url_path = "/open-apis/wiki/v2/spaces/{}/nodes"
-# loader = FeishuWikiReader(app_id, app_secret)
 
 client = lark.Client.builder() \
         .enable_set_token(True) \
@@ -108,43 +104,15 @@ redirect_url = "https://open.feishu.cn/api-explorer/cli_a6df1d71d5f2d00d"
 # oauth_code = getOAuthCode(app_id, redirect_url)
 # user_access_token = getUserAccessToken(oauth_code)
 
-def readWiki(space_id, app_id, app_secret):
+async def readWiki(space_id, app_id, app_secret):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
-
-    # list wiki docs
-    request: ListSpaceNodeRequest = ListSpaceNodeRequest.builder() \
-        .space_id(space_id) \
-        .build()
-
-    # 发起请求
-    response: ListSpaceNodeResponse = client.wiki.v2.space_node.list(request)
-
-    # 处理失败返回
-    if not response.success():
-        lark.logger.error(
-            f"client.wiki.v2.space_node.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        return
-
-    # 处理业务结果
-    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
-
-
-    # 构造请求对象
-    # request: SearchWikiRequest = SearchWikiRequest.builder() \
-    #     .query("Case 1") \
-    #     .space_id(space_id) \
-    #     .node_id(node_id) \
-    #     .build()
-    # response: SearchWikiResponse = client.wiki.v2.space_node.search(request, option)
-
-    docIDs = [item.obj_token for item in response.data.items]
-    # print(f'DOC IDs: {docIDs}')
-    docTitles = [item.title for item in response.data.items]
-
-    # read docs
-
-    for doc_id, title in zip(docIDs, docTitles):
-
+    nodes = await get_all_wiki_nodes(space_id, tenant_access_token)
+    print(nodes)
+    for node in nodes:
+        doc_id = node["obj_token"]
+        title = node["title"]
+        doc_type = node["obj_type"]
+        
         # 构造请求对象
         request: GetDocumentRequest = GetDocumentRequest.builder() \
             .document_id(doc_id) \
@@ -180,24 +148,27 @@ def readWiki(space_id, app_id, app_secret):
             with open("./data/"+title, 'w') as f:
                 f.write(response.data.content)
 
-        request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
-        .document_id(doc_id) \
-        .page_size(500) \
-        .document_revision_id(-1) \
-        .build()
+        if doc_type=="sheet":
+            pass
+        elif doc_type=="docx":
+            request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
+            .document_id(doc_id) \
+            .page_size(500) \
+            .document_revision_id(-1) \
+            .build()
 
-        # 发起请求
-        response: ListDocumentBlockResponse = client.docx.v1.document_block.list(request)
+            # 发起请求
+            listBlockResponse: ListDocumentBlockResponse = client.docx.v1.document_block.list(request)
 
-        # 处理失败返回
-        if not response.success():
-            lark.logger.error(
-                f"client.docx.v1.document_block.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        else:
-            # 处理业务结果
-            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            # 处理失败返回
+            if not listBlockResponse.success():
+                lark.logger.error(
+                    f"client.docx.v1.document_block.list failed, code: {listBlockResponse.code}, msg: {listBlockResponse.msg}, log_id: {listBlockResponse.get_log_id()}")
+            else:
+                # 处理业务结果
+                lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
         
-    
+        
 
     # # 处理失败返回
     # if not response.success():

@@ -4,10 +4,8 @@ import asyncio
 
 # Constants
 FEISHU_OPENAPI_ENDPOINT = "https://open.feishu.cn/open-apis/wiki/v2/spaces"
-tenantAccessToken = os.environ["TENANT_ACCESS_TOKEN"]
 
-
-async def get_wiki_node_list(space_id, page_token=None, parent_node_token=None, headers=None):
+async def get_wiki_node_list(space_id, headers, page_token=None, parent_node_token=None):
     url = f"{FEISHU_OPENAPI_ENDPOINT}/{space_id}/nodes?page_size=50"
     if page_token:
         url += f"&page_token={page_token}"
@@ -37,7 +35,7 @@ async def get_all_wiki_nodes(space_id, tenantAccessToken):
 
         while has_more and (page_token is None or page_token.strip()):
             # Fetch top-level nodes with pagination
-            paged_result = await get_wiki_node_list(space_id, page_token, headers)
+            paged_result = await get_wiki_node_list(space_id, headers, page_token)
             if paged_result:
                 nodes.extend(paged_result['items'])
 
@@ -70,7 +68,7 @@ async def get_wiki_child_nodes(space_id, parent_node_token, headers):
     has_more = True
 
     while has_more and (page_token is None or page_token.strip()):
-        paged_result = await get_wiki_node_list(space_id, page_token, parent_node_token, headers)
+        paged_result = await get_wiki_node_list(space_id, headers, page_token, parent_node_token)
         child_nodes.extend(paged_result['items'])
 
         for item in paged_result['items']:
