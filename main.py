@@ -56,6 +56,10 @@ def load_data():
         return index
     
 def main():
+    # from authFeishu import Auth
+    # auth = Auth("https://open.feishu.cn", app_id, app_secret)
+    # auth.authorize_app_access_token()
+
     Settings.llm = llm_map["gpt4o"]
     index = load_data()
 
