@@ -11,3 +11,5 @@ pypdf
 requests
 lark-oapi
 docx2txt
+pandas 
+xlsxwriter

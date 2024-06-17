@@ -5,6 +5,7 @@ import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
+from lark_oapi.api.sheets.v3 import *
 import streamlit as st
 from listAllWiki import *
 
@@ -51,16 +52,6 @@ def getAppAccessToken(app_id, app_secret):
 
     return response.data["app_access_token"]
 
-def getOAuthCode(app_id, redirect_url):
-    url = f"https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={app_id}&redirect_uri={redirect_url}"
-    headers = {
-        "Content-Type": "application/json"
-    }
-    response = requests.get(url, headers)
-    if response.status_code == 200:
-        return response.data["code"]
-    else:
-        print("Failed to get oauth code. Status code:", response.status_code)
 
 def getTenantAccessToken(app_id, app_secret):
     request: InternalTenantAccessTokenRequest = InternalTenantAccessTokenRequest.builder() \
@@ -83,34 +74,6 @@ def getTenantAccessToken(app_id, app_secret):
     lark.logger.info(lark.JSON.marshal(response, indent=4))
     return json.loads(response.raw.content)["tenant_access_token"]
 
-def getUserAccessToken(oauth_code):
-    # 构造请求对象
-    request: CreateOidcAccessTokenRequest = CreateOidcAccessTokenRequest.builder() \
-        .request_body(CreateOidcAccessTokenRequestBody.builder()
-            .grant_type("authorization_code")
-            .code(oauth_code)
-            .build()) \
-        .build()
-
-    # 发起请求
-    response: CreateOidcAccessTokenResponse = client.authen.v1.oidc_access_token.create(request)
-
-    # 处理失败返回
-    if not response.success():
-        lark.logger.error(
-            f"client.authen.v1.oidc_access_token.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        return
-
-    # 处理业务结果
-    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
-
-    return response.data["access_token"]
-
-# get oauth code to get user access token
-redirect_url = "https://open.feishu.cn/api-explorer/cli_a6df1d71d5f2d00d"
-# app_access_token = getAppAccessToken(app_id, app_secret)
-# oauth_code = getOAuthCode(app_id, redirect_url)
-# user_access_token = getUserAccessToken(oauth_code)
 
 async def readWiki(space_id, app_id, app_secret):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
@@ -146,7 +109,40 @@ async def readWiki(space_id, app_id, app_secret):
         # doc_id = response.data.document.id
 
         if doc_type=="sheet":
-            pass
+            sheet_token = doc_id
+            request: QuerySpreadsheetSheetRequest = QuerySpreadsheetSheetRequest.builder() \
+        .spreadsheet_token(sheet_token) \
+        .build()
+
+            # 发起请求
+            response: QuerySpreadsheetSheetResponse = client.sheets.v3.spreadsheet_sheet.query(request)
+
+            # 处理失败返回
+            if not response.success():
+                lark.logger.error(
+                    f"client.sheets.v3.spreadsheet_sheet.query failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+            else:
+                # 处理业务结果
+                lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+                sheets = response.data.sheets
+
+                with pd.ExcelWriter("./data/"+title, engine='xlsxwriter') as writer:
+                    for sheet in sheets:
+                        url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
+                        headers = {
+                            'Authorization': f'Bearer {tenant_access_token}'
+                        }
+
+                        response = requests.get(url, headers=headers)
+                        if response.status_code==200:
+                            respJson = response.json()
+                            sheet_data = respJson["data"]["valueRange"]["values"]
+                            df = pd.DataFrame(sheet_data)
+                            df.to_excel(writer, sheet_name=sheet.title, index=False)
+                        else:
+                            lark.logger.error(
+                            f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}")
+            
         elif doc_type=="docx":
             request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
             .document_id(doc_id) \
