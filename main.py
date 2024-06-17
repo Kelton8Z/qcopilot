@@ -16,6 +16,8 @@ from readFeishuWiki import readWiki
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
+os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
+os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 space_id = st.secrets.feishu_space_id
