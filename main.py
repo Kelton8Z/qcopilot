@@ -67,14 +67,31 @@ def main():
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
         st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
+    if 'voted' not in st.session_state:
+        st.session_state.voted = False
 
-    prompt = st.chat_input("Your question")
+    prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
     if prompt: # Prompt for user input and save to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
+        
+    if 'thumbs_up' not in st.session_state:
+        st.session_state.thumbs_up = 0
+
+    if 'thumbs_down' not in st.session_state:
+        st.session_state.thumbs_down = 0
 
     for message in st.session_state.messages: # Display the prior chat messages
         with st.chat_message(message["role"]):
             st.write(message["content"])
+
+    @st.experimental_dialog("Thumb up/down")
+    def vote(item):
+        st.session_state.voted = True
+        st.write(f"Why {item}?")
+        reason = st.text_input("Because...")
+        if st.button("Submit"):
+            st.session_state.vote = {"item": item, "reason": reason}
+            st.rerun()
 
     # If last message is not from assistant, generate a new response
     if st.session_state.messages[-1]["role"] != "assistant":
@@ -84,5 +101,11 @@ def main():
                 st.write(response.response)
                 message = {"role": "assistant", "content": response.response}
                 st.session_state.messages.append(message) # Add response to message history
-
+        st.session_state.voted = False
+    else:
+        if not st.session_state.voted:
+            if st.button("👍"):
+                vote("👍")
+            if st.button("👎"):
+                vote("👎")
 main()
