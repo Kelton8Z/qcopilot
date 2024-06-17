@@ -9,7 +9,6 @@ from lark_oapi.api.sheets.v3 import *
 import streamlit as st
 from listAllWiki import *
 
-from llama_index.embeddings.jinaai import JinaEmbedding
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 from llama_index.core.readers.base import BaseReader
 import pandas as pd
@@ -22,7 +21,7 @@ class ExcelReader(BaseReader):
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 
-client = lark.Client.builder() \
+larkClient = lark.Client.builder() \
         .enable_set_token(True) \
         .log_level(lark.LogLevel.DEBUG) \
         .app_id(app_id) \
@@ -39,7 +38,7 @@ def getAppAccessToken(app_id, app_secret):
         .build()
 
     # 发起请求
-    response: InternalAppAccessTokenResponse = client.auth.v3.app_access_token.internal(request)
+    response: InternalAppAccessTokenResponse = larkClient.auth.v3.app_access_token.internal(request)
 
     # 处理失败返回
     if not response.success():
@@ -62,7 +61,7 @@ def getTenantAccessToken(app_id, app_secret):
         .build()
 
     # 发起请求
-    response: InternalTenantAccessTokenResponse = client.auth.v3.tenant_access_token.internal(request)
+    response: InternalTenantAccessTokenResponse = larkClient.auth.v3.tenant_access_token.internal(request)
 
     # 处理失败返回
     if not response.success():
@@ -115,7 +114,7 @@ async def readWiki(space_id, app_id, app_secret):
         .build()
 
             # 发起请求
-            response: QuerySpreadsheetSheetResponse = client.sheets.v3.spreadsheet_sheet.query(request)
+            response: QuerySpreadsheetSheetResponse = larkClient.sheets.v3.spreadsheet_sheet.query(request)
 
             # 处理失败返回
             if not response.success():
@@ -150,7 +149,7 @@ async def readWiki(space_id, app_id, app_secret):
             .build()
 
             # 发起请求
-            response: RawContentDocumentResponse = client.docx.v1.document.raw_content(request, option)
+            response: RawContentDocumentResponse = larkClient.docx.v1.document.raw_content(request, option)
             if not response.success():
                 lark.logger.error(
                     f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
@@ -165,7 +164,7 @@ async def readWiki(space_id, app_id, app_secret):
             .build()
 
             # 发起请求
-            listBlockResponse: ListDocumentBlockResponse = client.docx.v1.document_block.list(request)
+            listBlockResponse: ListDocumentBlockResponse = larkClient.docx.v1.document_block.list(request)
 
             # 处理失败返回
             if not listBlockResponse.success():
@@ -178,12 +177,9 @@ async def readWiki(space_id, app_id, app_secret):
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
     
+    from llama_index.embeddings.openai import OpenAIEmbedding
 
-    embed_model = JinaEmbedding(
-        api_key=st.secrets.jinaai_key,
-        model="jina-embeddings-v2-base-en",
-        embed_batch_size=16,
-    )
+    embed_model = OpenAIEmbedding(model="text-embedding-3-large")
     index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
     return index
 
