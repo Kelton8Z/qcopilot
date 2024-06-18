@@ -13,11 +13,24 @@ from llama_index.llms.anthropic import Anthropic
 from llama_index.core import Settings
 
 from readFeishuWiki import readWiki
+
+from streamlit_feedback import streamlit_feedback
+from langchain.callbacks.tracers.run_collector import RunCollectorCallbackHandler
+from langchain.memory import StreamlitChatMessageHistory, ConversationBufferMemory
+from langchain.schema.runnable import RunnableConfig
+from langsmith import Client
+from langchain.callbacks.tracers.langchain import wait_for_all_tracers
+# from essential_chain import initialize_chain
+
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
 os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
+# = os.environ["LANGCHAIN_ENDPOINT"] = langchain_endpoint ="https://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
+os.environ["LANGCHAIN_TRACING_V2"] = "true" 
+langchain_api_key = st.secrets.langsmith_key
+
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 space_id = st.secrets.feishu_space_id
@@ -37,6 +50,7 @@ os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
+           "kimi": OpenAI(api_key = st.secrets.kimi_key, base_url = "https://api.moonshot.cn/v1"),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
@@ -53,7 +67,16 @@ def load_data():
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
         # recursively read wiki and write each file into the machine
-        index = asyncio.run(readWiki(space_id, app_id, app_secret))
+        # from llama_index.embeddings.jinaai import JinaEmbedding
+        # embed_model = JinaEmbedding(
+        #     api_key=st.secrets.jinaai_key,
+        #     model="jina-embeddings-v2-base-en",
+        #     embed_batch_size=16,
+        # )
+        from llama_index.embeddings.openai import OpenAIEmbedding
+        embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+
+        index = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index
     
@@ -62,36 +85,42 @@ def main():
     # auth = Auth("https://open.feishu.cn", app_id, app_secret)
     # auth.authorize_app_access_token()
 
-    Settings.llm = llm_map["gpt4o"]
+    Settings.llm = llm_map["gpt3.5"]
     index = load_data()
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
         st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
     if 'voted' not in st.session_state:
-        st.session_state.voted = False
-
+        st.session_state.voted = True
+        
+    memory = ConversationBufferMemory(
+        chat_memory=StreamlitChatMessageHistory(key="langchain_messages"),
+        return_messages=True,
+        memory_key="chat_history",
+    )
+    
+    if st.sidebar.button("Clear message history"):
+        print("Clearing message history")
+        memory.clear()
+        st.session_state.trace_link = None
+        st.session_state.run_id = None
+        
+        
+    langsmith_client = Client(api_key=langchain_api_key)
+    last_run = next(langsmith_client.list_runs(
+        project_name="default"
+    ))
+    
+    feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
+    
     prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
     if prompt: # Prompt for user input and save to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-    if 'thumbs_up' not in st.session_state:
-        st.session_state.thumbs_up = 0
-
-    if 'thumbs_down' not in st.session_state:
-        st.session_state.thumbs_down = 0
 
     for message in st.session_state.messages: # Display the prior chat messages
         with st.chat_message(message["role"]):
             st.write(message["content"])
 
-    @st.experimental_dialog("Thumb up/down")
-    def vote(item):
-        st.session_state.voted = True
-        st.write(f"Why {item}?")
-        reason = st.text_input("Because...")
-        if st.button("Submit"):
-            st.session_state.vote = {"item": item, "reason": reason}
-            st.rerun()
 
     # If last message is not from assistant, generate a new response
     if st.session_state.messages[-1]["role"] != "assistant":
@@ -101,11 +130,11 @@ def main():
                 st.write(response.response)
                 message = {"role": "assistant", "content": response.response}
                 st.session_state.messages.append(message) # Add response to message history
-        st.session_state.voted = False
-    else:
-        if not st.session_state.voted:
-            if st.button("👍"):
-                vote("👍")
-            if st.button("👎"):
-                vote("👎")
+                # if st.session_state.get("run_id"):
+                feedback = streamlit_feedback(
+                    feedback_type=feedback_option,  # Apply the selected feedback style
+                    optional_text_label="[Optional] Please provide an explanation",  # Allow for additional comments
+                    key=f"feedback_{last_run.id}",
+                )
+
 main()

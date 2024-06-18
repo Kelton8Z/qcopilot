@@ -74,7 +74,7 @@ def getTenantAccessToken(app_id, app_secret):
     return json.loads(response.raw.content)["tenant_access_token"]
 
 
-async def readWiki(space_id, app_id, app_secret):
+async def readWiki(space_id, app_id, app_secret, embed_model):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
     nodes = await get_all_wiki_nodes(space_id, tenant_access_token)
     directory = "./data"
@@ -177,9 +177,6 @@ async def readWiki(space_id, app_id, app_secret):
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
     
-    from llama_index.embeddings.openai import OpenAIEmbedding
-
-    embed_model = OpenAIEmbedding(model="text-embedding-3-large")
     index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
     return index
 
