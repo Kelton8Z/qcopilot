@@ -51,7 +51,6 @@ os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
-           "kimi": OpenAI(api_key = st.secrets.kimi_key, base_url = "https://api.moonshot.cn/v1"),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
