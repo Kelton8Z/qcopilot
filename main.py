@@ -6,7 +6,6 @@ from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
 import openai
-import anthropic
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
@@ -15,21 +14,23 @@ from llama_index.core import Settings
 from readFeishuWiki import readWiki
 
 from streamlit_feedback import streamlit_feedback
-from langchain.callbacks.tracers.run_collector import RunCollectorCallbackHandler
-from langchain.memory import StreamlitChatMessageHistory, ConversationBufferMemory
-from langchain.schema.runnable import RunnableConfig
-from langsmith import Client
-from langchain.callbacks.tracers.langchain import wait_for_all_tracers
-# from essential_chain import initialize_chain
+from langsmith.run_helpers import get_current_run_tree
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
+from langchain.memory import ConversationBufferMemory
+from langchain_core.tracers.context import tracing_v2_enabled
+from langsmith import Client, traceable
 
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
-os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
-# = os.environ["LANGCHAIN_ENDPOINT"] = langchain_endpoint ="https://vasi.chitu.ai/v1"
+# os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
+os.environ["LANGCHAIN_PROJECT"] = "default"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
-langchain_api_key = st.secrets.langsmith_key
+langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
+
+langsmith_project_id = st.secrets.langsmith_project_id
+langsmith_client = Client(api_key=langchain_api_key)
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
@@ -61,6 +62,19 @@ if "messages" not in st.session_state.keys(): # Initialize the chat messages his
         {"role": "assistant", "content": "Ask me a question!"}
     ]
 
+    
+def _submit_feedback(user_response, emoji=None):
+    feedback = user_response['score']
+    feedback_text = user_response['text']
+    st.toast(f"Feedback submitted: {feedback}", icon=emoji)
+    langsmith_client.create_feedback(
+        st.session_state.run_id,
+        key="user-score",
+        score=0.0 if feedback=="👎" else 1.0,
+        comment=feedback_text,
+    )
+    return user_response
+
 @st.cache_resource(show_spinner=False)
 def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
@@ -75,15 +89,17 @@ def load_data():
         # )
         from llama_index.embeddings.openai import OpenAIEmbedding
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
-
+        # from llama_index.core import VectorStoreIndex
+        # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
         index = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index
     
+@traceable
 def main():
-    # from authFeishu import Auth
-    # auth = Auth("https://open.feishu.cn", app_id, app_secret)
-    # auth.authorize_app_access_token()
+    run = get_current_run_tree()
+    run_id = run.id
+    st.session_state.run_id = run_id
 
     Settings.llm = llm_map["gpt3.5"]
     index = load_data()
@@ -105,22 +121,31 @@ def main():
         st.session_state.trace_link = None
         st.session_state.run_id = None
         
-        
-    langsmith_client = Client(api_key=langchain_api_key)
-    last_run = next(langsmith_client.list_runs(
-        project_name="default"
-    ))
     
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
+
+    feedback_kwargs = {
+        "feedback_type": feedback_option,
+        "optional_text_label": "Please provide extra information",
+        "on_submit": _submit_feedback,
+    }
     
     prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
     if prompt: # Prompt for user input and save to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-    for message in st.session_state.messages: # Display the prior chat messages
+    for i, message in enumerate(st.session_state.messages): # Display the prior chat messages
         with st.chat_message(message["role"]):
             st.write(message["content"])
-
+            
+    message = st.session_state.messages[-1]
+    if message["role"]=="assistant":
+        feedback_key = f"feedback_{int(i/2)}"
+        # This actually commits the feedback
+        streamlit_feedback(
+            **feedback_kwargs,
+            key=feedback_key,
+        )
 
     # If last message is not from assistant, generate a new response
     if st.session_state.messages[-1]["role"] != "assistant":
@@ -130,11 +155,12 @@ def main():
                 st.write(response.response)
                 message = {"role": "assistant", "content": response.response}
                 st.session_state.messages.append(message) # Add response to message history
-                # if st.session_state.get("run_id"):
-                feedback = streamlit_feedback(
-                    feedback_type=feedback_option,  # Apply the selected feedback style
-                    optional_text_label="[Optional] Please provide an explanation",  # Allow for additional comments
-                    key=f"feedback_{last_run.id}",
-                )
+                # st.rerun()
+                with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
+                    feedback_index = int(
+                        (len(st.session_state.get("messages", [])) - 1) / 2
+                    )
+                    run = cb.latest_run
+                    streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
 
 main()

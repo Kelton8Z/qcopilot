@@ -13,3 +13,5 @@ lark-oapi
 docx2txt
 pandas 
 xlsxwriter
+streamlit_feedback
+langsmith
