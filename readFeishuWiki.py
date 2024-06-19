@@ -154,8 +154,11 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 lark.logger.error(
                     f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
             else:
-                with open("./data/"+title, 'w') as f:
-                    f.write(response.data.content)
+                try:
+                    with open("./data/"+title, 'w') as f:
+                        f.write(response.data.content)
+                except:
+                    pass
 
             request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
             .document_id(doc_id) \
