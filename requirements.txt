@@ -1,5 +1,6 @@
 streamlit
 openai
+tenacity>=8.2.0,<8.4.0
 llama-index
 llama-index-llms-ollama
 llama-index-llms-openai
@@ -15,3 +16,4 @@ pandas
 xlsxwriter
 streamlit_feedback
 langsmith
+langchain_community
