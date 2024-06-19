@@ -80,32 +80,14 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
     directory = "./data"
     if not os.path.exists(directory):
         os.makedirs(directory)
-    print(nodes)
+
     for node in nodes:
         doc_id = node["obj_token"]
         title = node["title"]
         doc_type = node["obj_type"]
-        
-        # 构造请求对象
-        # request: GetDocumentRequest = GetDocumentRequest.builder() \
-        #     .document_id(doc_id) \
-        #     .build()
 
         # 发起请求
         option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
-        # response: GetDocumentResponse = client.docx.v1.document.get(request, option)
-
-        # # 处理失败返回
-        # if not response.success():
-        #     lark.logger.error(
-        #         f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-        #     return
-
-        # # 处理业务结果
-        # lark.logger.info(lark.JSON.marshal(response.data, indent=4))
-
-        # title = response.data.document.title
-        # doc_id = response.data.document.id
 
         if doc_type=="sheet":
             sheet_token = doc_id
@@ -183,14 +165,6 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
     index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
     return index
 
-    # # 处理失败返回
-    # if not response.success():
-    #     lark.logger.error(
-    #         f"client.wiki.v2.space_node.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-    #     return
-
-    # # 处理业务结果
-    # lark.logger.info(lark.JSON.marshal(response.data, indent=4))
 
 def searchWiki(space_id, node_id, query, user_access_token):
 
@@ -217,7 +191,3 @@ def searchWiki(space_id, node_id, query, user_access_token):
         print("Search Results:", result)
     else:
         print("Failed to search nodes. Status code:", response.status_code)
-
-# readWiki(space_id)
-# query = "Case 1"
-# searchWiki(space_id, node_id, query, user_access_token)
