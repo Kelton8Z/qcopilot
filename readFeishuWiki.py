@@ -9,10 +9,17 @@ from lark_oapi.api.sheets.v3 import *
 import streamlit as st
 from listAllWiki import *
 
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext
 from llama_index.core.readers.base import BaseReader
 import pandas as pd
 from llama_index.core import Document
+
+import chromadb
+
+
+collection = "qcWiki"
+
 
 class ExcelReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
@@ -165,7 +172,19 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
 
-    index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+    db = chromadb.PersistentClient(path="./chroma_db")
+    chroma_collection = db.get_or_create_collection(collection)
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    index = VectorStoreIndex.from_documents(
+        docs, storage_context=storage_context, embed_model=embed_model
+    )
+
+    # load from disk
+    db2 = chromadb.PersistentClient(path="./chroma_db")
+    chroma_collection = db2.get_or_create_collection(collection)
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     return index
 
 
