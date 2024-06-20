@@ -17,8 +17,8 @@ from llama_index.core import Document
 
 import chromadb
 
-
 collection = "qcWiki"
+chroma_db_path = "chroma_db"
 
 
 class ExcelReader(BaseReader):
@@ -171,20 +171,61 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
             
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
+    
+    import hashlib
+    hash_file_path = "./documents_hash.txt"
 
-    db = chromadb.PersistentClient(path="./chroma_db")
-    chroma_collection = db.get_or_create_collection(collection)
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    def calculate_hash(documents):
+        """Calculate the SHA-256 hash of the documents."""
+        doc_str = json.dumps([doc.text for doc in documents], sort_keys=True)
+        return hashlib.sha256(doc_str.encode('utf-8')).hexdigest()
 
-    index = VectorStoreIndex.from_documents(
-        docs, storage_context=storage_context, embed_model=embed_model
-    )
+    def load_hash():
+        """Load the previously saved hash from file."""
+        if os.path.exists(hash_file_path):
+            with open(hash_file_path, 'r') as f:
+                return f.read()
+        return None
 
-    # load from disk
-    db2 = chromadb.PersistentClient(path="./chroma_db")
-    chroma_collection = db2.get_or_create_collection(collection)
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    def save_hash(new_hash):
+        """Save the new hash to file."""
+        with open(hash_file_path, 'w') as f:
+            f.write(new_hash)
+
+    current_hash = calculate_hash(docs)
+
+    # Load the previous hash
+    previous_hash = load_hash()
+
+    # Check if the documents have been updated
+    if current_hash == previous_hash:
+        print("Documents have not been updated. Loading from disk.")
+        db = chromadb.PersistentClient(path=chroma_db_path)
+        chroma_collection = db.get_or_create_collection(collection)
+        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+        # Load the existing index from the vector store
+        index = VectorStoreIndex.from_vector_store(
+            vector_store,
+            embed_model=embed_model,
+        )
+    else:
+        print("Documents have been updated. Creating new vector store and index.")
+        # Save the new hash
+        save_hash(current_hash)
+
+        # Create a new vector store and index
+        db = chromadb.PersistentClient(path=chroma_db_path)
+        chroma_collection = db.get_or_create_collection(collection)
+        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+        # Create a new index from documents
+        index = VectorStoreIndex.from_documents(
+            docs, storage_context=storage_context, embed_model=embed_model
+        )
+        
     return index
 
 
