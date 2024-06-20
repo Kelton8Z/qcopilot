@@ -12,6 +12,7 @@ from listAllWiki import *
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 from llama_index.core.readers.base import BaseReader
 import pandas as pd
+from llama_index.core import Document
 
 class ExcelReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
@@ -136,11 +137,13 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 lark.logger.error(
                     f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
             else:
-                try:
-                    with open("./data/"+title, 'w') as f:
-                        f.write(response.data.content)
-                except:
-                    pass
+                path = "./data/"+title
+                if not os.path.exists(path):
+                    try:
+                        with open(path, 'w') as f:
+                            f.write(response.data.content)
+                    except:
+                        pass
 
             request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
             .document_id(doc_id) \
@@ -161,7 +164,7 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
             
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
     docs = reader.load_data()
-    
+
     index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
     return index
 
