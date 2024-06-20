@@ -17,3 +17,4 @@ xlsxwriter
 streamlit_feedback
 langsmith
 langchain_community
+llama-index-vector-stores-chroma
