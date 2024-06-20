@@ -158,15 +158,15 @@ def main():
                 st.write(response_msg)
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
-                
-                requests.patch(
-                    f"https://api.smith.langchain.com/runs/{run_id}",
-                    json={
-                        "inputs": {"text": prompt},
-                        "outputs": {"my_output": response_msg},
-                    },
-                    headers={"x-api-key": langchain_api_key},
-                )
+                if prompt:
+                    requests.patch(
+                        f"https://api.smith.langchain.com/runs/{run_id}",
+                        json={
+                            "inputs": {"text": prompt},
+                            "outputs": {"my_output": response_msg},
+                        },
+                        headers={"x-api-key": langchain_api_key},
+                    )
                     
                 # st.rerun()
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
