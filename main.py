@@ -1,5 +1,6 @@
 import os
 import asyncio
+import requests
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
@@ -27,6 +28,7 @@ st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initia
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 os.environ["LANGCHAIN_PROJECT"] = "default"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
 
 langsmith_project_id = st.secrets.langsmith_project_id
@@ -66,11 +68,12 @@ def _submit_feedback(user_response, emoji=None):
     feedback = user_response['score']
     feedback_text = user_response['text']
     st.toast(f"Feedback submitted: {feedback}", icon=emoji)
+    messages = st.session_state.messages
     langsmith_client.create_feedback(
         st.session_state.run_id,
         key="user-score",
         score=0.0 if feedback=="👎" else 1.0,
-        comment=feedback_text,
+        comment=f'{messages[-2]["content"] if len(messages)>1 else ""} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
     )
     return user_response
 
@@ -97,10 +100,10 @@ def load_data():
 @traceable
 def main():
     run = get_current_run_tree()
-    run_id = run.id
+    run_id = str(run.id)
     st.session_state.run_id = run_id
 
-    Settings.llm = llm_map["gpt3.5"]
+    Settings.llm = llm_map["gpt4o"]
     index = load_data()
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
@@ -131,7 +134,7 @@ def main():
     
     prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
     if prompt: # Prompt for user input and save to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": prompt})        
 
     for i, message in enumerate(st.session_state.messages): # Display the prior chat messages
         with st.chat_message(message["role"]):
@@ -151,9 +154,20 @@ def main():
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = st.session_state.chat_engine.chat(prompt)
-                st.write(response.response)
-                message = {"role": "assistant", "content": response.response}
+                response_msg = response.response
+                st.write(response_msg)
+                message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
+                
+                requests.patch(
+                    f"https://api.smith.langchain.com/runs/{run_id}",
+                    json={
+                        "inputs": {"text": prompt},
+                        "outputs": {"my_output": response_msg},
+                    },
+                    headers={"x-api-key": langchain_api_key},
+                )
+                    
                 # st.rerun()
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
