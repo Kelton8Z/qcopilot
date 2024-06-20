@@ -16,8 +16,6 @@ from readFeishuWiki import readWiki
 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
-from langchain_community.chat_message_histories import StreamlitChatMessageHistory
-from langchain.memory import ConversationBufferMemory
 from langchain_core.tracers.context import tracing_v2_enabled
 from langsmith import Client, traceable
 
@@ -111,17 +109,12 @@ def main():
     if 'voted' not in st.session_state:
         st.session_state.voted = True
         
-    memory = ConversationBufferMemory(
-        chat_memory=StreamlitChatMessageHistory(key="langchain_messages"),
-        return_messages=True,
-        memory_key="chat_history",
-    )
     
     if st.sidebar.button("Clear message history"):
         print("Clearing message history")
-        memory.clear()
-        st.session_state.trace_link = None
         st.session_state.run_id = None
+        st.session_state.messages = []
+        st.session_state.chat_engine.reset()
         
     
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
@@ -140,40 +133,41 @@ def main():
         with st.chat_message(message["role"]):
             st.write(message["content"])
             
-    message = st.session_state.messages[-1]
-    if message["role"]=="assistant":
-        feedback_key = f"feedback_{int(i/2)}"
-        # This actually commits the feedback
-        streamlit_feedback(
-            **feedback_kwargs,
-            key=feedback_key,
-        )
+    if st.session_state.messages:
+        message = st.session_state.messages[-1]
+        if message["role"]=="assistant":
+            feedback_key = f"feedback_{int(i/2)}"
+            # This actually commits the feedback
+            streamlit_feedback(
+                **feedback_kwargs,
+                key=feedback_key,
+            )
 
-    # If last message is not from assistant, generate a new response
-    if st.session_state.messages[-1]["role"] != "assistant":
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = st.session_state.chat_engine.chat(prompt)
-                response_msg = response.response
-                st.write(response_msg)
-                message = {"role": "assistant", "content": response_msg}
-                st.session_state.messages.append(message) # Add response to message history
-                
-                requests.patch(
-                    f"https://api.smith.langchain.com/runs/{run_id}",
-                    json={
-                        "inputs": {"text": prompt},
-                        "outputs": {"my_output": response_msg},
-                    },
-                    headers={"x-api-key": langchain_api_key},
-                )
-                    
-                # st.rerun()
-                with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
-                    feedback_index = int(
-                        (len(st.session_state.get("messages", [])) - 1) / 2
-                    )
-                    run = cb.latest_run
-                    streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
+        # If last message is not from assistant, generate a new response
+        if st.session_state.messages[-1]["role"] != "assistant":
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    response = st.session_state.chat_engine.chat(prompt)
+                    response_msg = response.response
+                    st.write(response_msg)
+                    message = {"role": "assistant", "content": response_msg}
+                    st.session_state.messages.append(message) # Add response to message history
+                    if prompt:
+                        requests.patch(
+                            f"https://api.smith.langchain.com/runs/{run_id}",
+                            json={
+                                "inputs": {"text": prompt},
+                                "outputs": {"my_output": response_msg},
+                            },
+                            headers={"x-api-key": langchain_api_key},
+                        )
+                        
+                    # st.rerun()
+                    with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
+                        feedback_index = int(
+                            (len(st.session_state.get("messages", [])) - 1) / 2
+                        )
+                        run = cb.latest_run
+                        streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
 
 main()
