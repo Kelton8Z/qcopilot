@@ -103,7 +103,7 @@ def load_data():
         
         return index
     
-@traceable(project_name="null")
+@traceable(name=st.session_state.session_id)
 def main():
     run = get_current_run_tree()
     run_id = str(run.id)
