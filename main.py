@@ -22,9 +22,9 @@ from langsmith import Client, traceable
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
-# os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
+os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-os.environ["LANGCHAIN_PROJECT"] = "default"
+os.environ["LANGCHAIN_PROJECT"] = "stage"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
