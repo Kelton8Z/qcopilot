@@ -1,4 +1,5 @@
 import os
+import uuid
 import asyncio
 import requests
 import lark_oapi as lark
@@ -41,6 +42,10 @@ client = lark.Client.builder() \
         .app_id(app_id) \
         .app_secret(app_secret) \
         .build()
+        
+# Initialize session state
+if 'session_id' not in st.session_state or not st.session_state.session_id:
+    st.session_state['session_id'] = str(uuid.uuid4())
 
 prompt = "You are an expert AI engineer in our company Qingcheng and your job is to answer technical questions. Keep your answers technical and based on facts – do not hallucinate features."
 openai.api_key = st.secrets.openai_key
@@ -67,12 +72,13 @@ def _submit_feedback(user_response, emoji=None):
     feedback_text = user_response['text']
     st.toast(f"Feedback submitted: {feedback}", icon=emoji)
     messages = st.session_state.messages
-    langsmith_client.create_feedback(
-        st.session_state.run_id,
-        key="user-score",
-        score=0.0 if feedback=="👎" else 1.0,
-        comment=f'{messages[-2]["content"] if len(messages)>1 else ""} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
-    )
+    if len(messages)>1:
+        langsmith_client.create_feedback(
+            st.session_state.run_id,
+            key="user-score",
+            score=0.0 if feedback=="👎" else 1.0,
+            comment=f'{messages[-2]["content"]} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
+        )
     return user_response
 
 @st.cache_resource(show_spinner=False)
@@ -95,7 +101,7 @@ def load_data():
         
         return index
     
-@traceable
+@traceable(name=st.session_state.session_id)
 def main():
     run = get_current_run_tree()
     run_id = str(run.id)
@@ -106,12 +112,10 @@ def main():
 
     if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
         st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
-    if 'voted' not in st.session_state:
-        st.session_state.voted = True
         
-    
     if st.sidebar.button("Clear message history"):
         print("Clearing message history")
+        st.session_state.session_id = None
         st.session_state.run_id = None
         st.session_state.messages = []
         st.session_state.chat_engine.reset()
@@ -125,7 +129,7 @@ def main():
         "on_submit": _submit_feedback,
     }
     
-    prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
+    prompt = st.chat_input("Your question")
     if prompt: # Prompt for user input and save to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})        
 
