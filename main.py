@@ -1,5 +1,6 @@
 import os
 import uuid
+import random
 import asyncio
 import requests
 import lark_oapi as lark
@@ -60,13 +61,10 @@ llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
+Settings.llm = llm_map["gpt4o"]
+demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
 
 st.title(title)
-         
-if "messages" not in st.session_state.keys(): # Initialize the chat messages history
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ask me a question!"}
-    ]
 
     
 def _submit_feedback(user_response, emoji=None, run_id=None):
@@ -103,25 +101,24 @@ def load_data():
         
         return index
     
+index = load_data()
+
+if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
+    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+         
+if "messages" not in st.session_state.keys() or st.sidebar.button("Clear message history"): # Initialize the chat messages history
+    st.session_state.session_id = None
+    st.session_state.run_id = None
+    st.session_state.chat_engine.reset()
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Ask me a question!"}
+    ]
+    
 @traceable(name=st.session_state.session_id)
 def main():
     run = get_current_run_tree()
     run_id = str(run.id)
     st.session_state.run_id = st.session_state["run_0"] = run_id
-
-    Settings.llm = llm_map["gpt4o"]
-    index = load_data()
-
-    if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
-        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-        
-    if st.sidebar.button("Clear message history"):
-        print("Clearing message history")
-        st.session_state.session_id = None
-        st.session_state.run_id = None
-        st.session_state.messages = []
-        st.session_state.chat_engine.reset()
-        
     
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
 
@@ -130,8 +127,31 @@ def main():
         "optional_text_label": "Please provide extra information",
     }
     
-    # Prompt for user input and save to chat history
-    prompt = st.chat_input("Your question")
+    prompt = ""
+    if len(st.session_state.messages)==1:
+        selected_prompts = random.sample(demo_prompts, 4)
+
+        st.markdown("""<style>
+        .stButton button {
+            display: inline-block;
+            height: 80px;
+        }
+        </style>""", unsafe_allow_html=True)
+                    
+        cols = st.columns(4, vertical_alignment="center")
+        for i, demo_prompt in enumerate(selected_prompts):
+            with cols[i]:
+                if st.button(demo_prompt):
+                    prompt = demo_prompt
+                    
+        # col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        # with col4:
+        #     if st.button("试试别的问题"):
+        #         selected_prompts = random.sample(demo_prompts, 4)
+
+    if not prompt:
+        # Prompt for user input and save to chat history
+        prompt = st.chat_input("Your question")
     if prompt: 
         st.session_state.messages.append({"role": "user", "content": prompt})        
 
