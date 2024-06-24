@@ -110,9 +110,7 @@ if "messages" not in st.session_state.keys() or st.sidebar.button("Clear message
     st.session_state.session_id = None
     st.session_state.run_id = None
     st.session_state.chat_engine.reset()
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ask me a question!"}
-    ]
+    st.session_state.messages = []
     
 @traceable(name=st.session_state.session_id)
 def main():
@@ -128,12 +126,13 @@ def main():
     }
     
     prompt = ""
-    if len(st.session_state.messages)==1:
+    if len(st.session_state.messages)==0:
         selected_prompts = random.sample(demo_prompts, 4)
 
         st.markdown("""<style>
         .stButton button {
             display: inline-block;
+            width: 100%;
             height: 80px;
         }
         </style>""", unsafe_allow_html=True)
@@ -143,6 +142,7 @@ def main():
             with cols[i]:
                 if st.button(demo_prompt):
                     prompt = demo_prompt
+                    break
                     
         # col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         # with col4:
@@ -209,4 +209,6 @@ def main():
                     run = cb.latest_run
                     streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
 
+            st.rerun()
+        
 main()
