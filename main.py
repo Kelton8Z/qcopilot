@@ -50,7 +50,7 @@ client = lark.Client.builder() \
 if 'session_id' not in st.session_state or not st.session_state.session_id:
     st.session_state['session_id'] = str(uuid.uuid4())
 
-prompt = "You are an expert AI engineer in our company Qingcheng and your job is to answer technical questions. Keep your answers technical and based on facts – do not hallucinate features."
+prompt = "You are an expert ai infra analyst at 清程极智. Use your knowledge base to answer questions about ai model/hardware performance. Show URLs of your sources whenever possible"
 openai.api_key = st.secrets.openai_key
 
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
@@ -97,11 +97,11 @@ def load_data():
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
         # from llama_index.core import VectorStoreIndex
         # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
-        index = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
+        index, fileToUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
-        return index
+        return index, fileToUrl 
     
-index = load_data()
+index, fileToUrl = load_data()
 
 if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
     st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
@@ -184,6 +184,14 @@ def main():
                     response_msg += token
                     response_container.write(response_msg)
 
+                file_paths = [node.metadata["file_path"] for node in streaming_response.source_nodes]
+                sources = "\n".join([fileToUrl[file_path] for file_path in file_paths])
+                source_msg = "  \nSources:\n" + sources
+                
+                for c in source_msg:
+                    response_msg += c
+                    response_container.write(response_msg)
+                
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
                 
