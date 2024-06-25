@@ -4,6 +4,7 @@ import json
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
+from lark_oapi.api.drive.v1 import *
 from lark_oapi.api.auth.v3 import *
 from lark_oapi.api.sheets.v3 import *
 import streamlit as st
@@ -19,12 +20,39 @@ import chromadb
 
 collection = "qcWiki"
 chroma_db_path = "chroma_db"
-
+fileToTitleAndUrl = {}
 
 class ExcelReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
         data = pd.read_excel(file_path).to_string()
         return [Document(text=data, metadata=extra_info)]
+    
+def getUrl(client, doc_id, doc_type):
+    request: BatchQueryMetaRequest = BatchQueryMetaRequest.builder() \
+        .request_body(MetaRequest.builder()
+            .request_docs([RequestDoc.builder()
+                .doc_token(doc_id)
+                .doc_type(doc_type)
+                .build()
+                ])
+            .with_url(True)
+            .build()) \
+        .build()
+
+    # 发起请求
+    response: BatchQueryMetaResponse = client.drive.v1.meta.batch_query(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.drive.v1.meta.batch_query failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+        return None
+
+    # 处理业务结果
+    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+    if len(response.data.metas)!=1:
+        print(f'{doc_type}" -> {response.data.metas}')
+    return response.data.metas[0].url
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
@@ -168,8 +196,16 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
             else:
                 # 处理业务结果
                 lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
-            
+                
+            try:
+                fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, doc_type)}
+            except:
+                print(f'failed {path}')
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
+    # automatically sets the metadata of each document according to filename_fn
+    docs = SimpleDirectoryReader(
+        "./data", file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")}
+    ).load_data()
     docs = reader.load_data()
     
     import hashlib
@@ -226,7 +262,7 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
             docs, storage_context=storage_context, embed_model=embed_model
         )
         
-    return index
+    return index, fileToTitleAndUrl
 
 
 def searchWiki(space_id, node_id, query, user_access_token):

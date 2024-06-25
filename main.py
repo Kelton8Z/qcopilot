@@ -1,4 +1,6 @@
 import os
+import uuid
+import random
 import asyncio
 import requests
 import lark_oapi as lark
@@ -7,6 +9,7 @@ from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
 import openai
+from functools import partial
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
@@ -16,8 +19,6 @@ from readFeishuWiki import readWiki
 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
-from langchain_community.chat_message_histories import StreamlitChatMessageHistory
-from langchain.memory import ConversationBufferMemory
 from langchain_core.tracers.context import tracing_v2_enabled
 from langsmith import Client, traceable
 
@@ -43,8 +44,13 @@ client = lark.Client.builder() \
         .app_id(app_id) \
         .app_secret(app_secret) \
         .build()
+        
 
-prompt = "You are an expert AI engineer in our company Qingcheng and your job is to answer technical questions. Keep your answers technical and based on facts – do not hallucinate features."
+# Initialize session state
+if 'session_id' not in st.session_state or not st.session_state.session_id:
+    st.session_state['session_id'] = str(uuid.uuid4())
+
+prompt = "You are an expert ai infra analyst at 清程极智. Use your knowledge base to answer questions about ai model/hardware performance. Show URLs of your sources whenever possible"
 openai.api_key = st.secrets.openai_key
 
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
@@ -55,26 +61,24 @@ llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
+Settings.llm = llm_map["gpt4o"]
+demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
 
 st.title(title)
-         
-if "messages" not in st.session_state.keys(): # Initialize the chat messages history
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ask me a question!"}
-    ]
 
     
-def _submit_feedback(user_response, emoji=None):
+def _submit_feedback(user_response, emoji=None, run_id=None):
     feedback = user_response['score']
     feedback_text = user_response['text']
-    st.toast(f"Feedback submitted: {feedback}", icon=emoji)
+    # st.toast(f"Feedback submitted: {feedback}", icon=emoji)
     messages = st.session_state.messages
-    langsmith_client.create_feedback(
-        st.session_state.run_id,
-        key="user-score",
-        score=0.0 if feedback=="👎" else 1.0,
-        comment=f'{messages[-2]["content"] if len(messages)>1 else ""} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
-    )
+    if len(messages)>1:
+        langsmith_client.create_feedback(
+            run_id,
+            key="user-score",
+            score=0.0 if feedback=="👎" else 1.0,
+            comment=f'{messages[-2]["content"]} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
+        )
     return user_response
 
 @st.cache_resource(show_spinner=False)
@@ -93,87 +97,127 @@ def load_data():
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
         # from llama_index.core import VectorStoreIndex
         # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
-        index = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
+        index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
-        return index
+        return index, fileToTitleAndUrl 
     
-@traceable
+index, fileToTitleAndUrl = load_data()
+
+if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
+    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+         
+if "messages" not in st.session_state.keys() or st.sidebar.button("Clear message history"): # Initialize the chat messages history
+    st.session_state.session_id = None
+    st.session_state.run_id = None
+    st.session_state.chat_engine.reset()
+    st.session_state.messages = []
+    
+@traceable(name=st.session_state.session_id)
 def main():
     run = get_current_run_tree()
     run_id = str(run.id)
-    st.session_state.run_id = run_id
-
-    Settings.llm = llm_map["gpt4o"]
-    index = load_data()
-
-    if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
-        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
-    if 'voted' not in st.session_state:
-        st.session_state.voted = True
-        
-    memory = ConversationBufferMemory(
-        chat_memory=StreamlitChatMessageHistory(key="langchain_messages"),
-        return_messages=True,
-        memory_key="chat_history",
-    )
-    
-    if st.sidebar.button("Clear message history"):
-        print("Clearing message history")
-        memory.clear()
-        st.session_state.trace_link = None
-        st.session_state.run_id = None
-        
+    st.session_state.run_id = st.session_state["run_0"] = run_id
     
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
 
     feedback_kwargs = {
         "feedback_type": feedback_option,
         "optional_text_label": "Please provide extra information",
-        "on_submit": _submit_feedback,
     }
     
-    prompt = st.chat_input("Your question", disabled=not st.session_state.voted)
-    if prompt: # Prompt for user input and save to chat history
+    prompt = ""
+    if len(st.session_state.messages)==0:
+        selected_prompts = random.sample(demo_prompts, 4)
+
+        st.markdown("""<style>
+        .stButton button {
+            display: inline-block;
+            width: 100%;
+            height: 80px;
+        }
+        </style>""", unsafe_allow_html=True)
+                    
+        cols = st.columns(4, vertical_alignment="center")
+        for i, demo_prompt in enumerate(selected_prompts):
+            with cols[i]:
+                if st.button(demo_prompt):
+                    prompt = demo_prompt
+                    break
+                    
+        # col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        # with col4:
+        #     if st.button("试试别的问题"):
+        #         selected_prompts = random.sample(demo_prompts, 4)
+
+    if not prompt:
+        # Prompt for user input and save to chat history
+        prompt = st.chat_input("Your question")
+    if prompt: 
         st.session_state.messages.append({"role": "user", "content": prompt})        
 
-    for i, message in enumerate(st.session_state.messages): # Display the prior chat messages
+    # Display the prior chat messages
+    for i, message in enumerate(st.session_state.messages): 
         with st.chat_message(message["role"]):
             st.write(message["content"])
             
-    message = st.session_state.messages[-1]
-    if message["role"]=="assistant":
-        feedback_key = f"feedback_{int(i/2)}"
-        # This actually commits the feedback
-        streamlit_feedback(
-            **feedback_kwargs,
-            key=feedback_key,
-        )
+    
+        if message["role"]=="assistant":
+            feedback_key = f"feedback_{int(i/2)}"
+            # This actually commits the feedback
+            streamlit_feedback(
+                **feedback_kwargs,
+                key=feedback_key,
+                on_submit=partial(
+                    _submit_feedback, run_id=st.session_state[f"run_{int(i/2)}"]
+                ),
+            )
 
-    # If last message is not from assistant, generate a new response
-    if st.session_state.messages[-1]["role"] != "assistant":
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = st.session_state.chat_engine.chat(prompt)
-                response_msg = response.response
-                st.write(response_msg)
+    if st.session_state.messages:
+        message = st.session_state.messages[-1]
+        # If last message is not from assistant, generate a new response
+        if message["role"] != "assistant":
+            with st.chat_message("assistant"):
+                response_container = st.empty()  # Container to hold the response as it streams
+                response_msg = ""
+                streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                for token in streaming_response.response_gen:
+                    response_msg += token
+                    response_container.write(response_msg)
+
+                file_paths = [node.metadata["file_path"] for node in streaming_response.source_nodes]
+                sources_list = ["[%s](%s)" % (fileToTitleAndUrl[file_path]["title"], fileToTitleAndUrl[file_path]["url"]) for file_path in file_paths]
+                sources = "\n".join(sources_list)
+                source_msg = "  \nSources:\n" + sources
+                
+                for c in source_msg:
+                    response_msg += c
+                    response_container.write(response_msg)
+                
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
                 
-                requests.patch(
-                    f"https://api.smith.langchain.com/runs/{run_id}",
-                    json={
-                        "inputs": {"text": prompt},
-                        "outputs": {"my_output": response_msg},
-                    },
-                    headers={"x-api-key": langchain_api_key},
-                )
+                # log nonnull converstaion to langsmith
+                if prompt and response_msg:
+                    print(f'{prompt} -> {response_msg}')
+                    requests.patch(
+                        f"https://api.smith.langchain.com/runs/{run_id}",
+                        json={
+                            "name": st.session_state.session_id,
+                            "inputs": {"text": prompt},
+                            "outputs": {"my_output": response_msg},
+                        },
+                        headers={"x-api-key": langchain_api_key},
+                    )
                     
                 # st.rerun()
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
-                        (len(st.session_state.get("messages", [])) - 1) / 2
+                        (len(st.session_state.messages) - 1) / 2
                     )
+                    st.session_state[f"run_{feedback_index}"] = run.id
                     run = cb.latest_run
                     streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
 
+            st.rerun()
+        
 main()
