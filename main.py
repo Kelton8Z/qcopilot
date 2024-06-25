@@ -97,11 +97,11 @@ def load_data():
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
         # from llama_index.core import VectorStoreIndex
         # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
-        index, fileToUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
+        index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
-        return index, fileToUrl 
+        return index, fileToTitleAndUrl 
     
-index, fileToUrl = load_data()
+index, fileToTitleAndUrl = load_data()
 
 if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
     st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
@@ -185,7 +185,8 @@ def main():
                     response_container.write(response_msg)
 
                 file_paths = [node.metadata["file_path"] for node in streaming_response.source_nodes]
-                sources = "\n".join([fileToUrl[file_path] for file_path in file_paths])
+                sources_list = ["[%s](%s)" % (fileToTitleAndUrl[file_path]["title"], fileToTitleAndUrl[file_path]["url"]) for file_path in file_paths]
+                sources = "\n".join(sources_list)
                 source_msg = "  \nSources:\n" + sources
                 
                 for c in source_msg:

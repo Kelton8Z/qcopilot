@@ -20,7 +20,7 @@ import chromadb
 
 collection = "qcWiki"
 chroma_db_path = "chroma_db"
-fileToUrl = {}
+fileToTitleAndUrl = {}
 
 class ExcelReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
@@ -198,14 +198,13 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
                 
             try:
-                fileToUrl[os.path.abspath(path)] = getUrl(larkClient, doc_id, doc_type)
+                fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, doc_type)}
             except:
                 print(f'failed {path}')
     reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
-    print(fileToUrl)
     # automatically sets the metadata of each document according to filename_fn
     docs = SimpleDirectoryReader(
-        "./data", file_metadata=lambda filename: {"file_name": fileToUrl.get(filename)}
+        "./data", file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")}
     ).load_data()
     docs = reader.load_data()
     
@@ -263,7 +262,7 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
             docs, storage_context=storage_context, embed_model=embed_model
         )
         
-    return index, fileToUrl
+    return index, fileToTitleAndUrl
 
 
 def searchWiki(space_id, node_id, query, user_access_token):
