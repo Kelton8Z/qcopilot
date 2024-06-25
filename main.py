@@ -14,6 +14,7 @@ from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 from llama_index.core import Settings
+from llama_index.core.postprocessor import SimilarityPostprocessor
 
 from readFeishuWiki import readWiki
 
@@ -183,15 +184,29 @@ def main():
                 for token in streaming_response.response_gen:
                     response_msg += token
                     response_container.write(response_msg)
-
-                file_paths = [node.metadata["file_path"] for node in streaming_response.source_nodes]
-                sources_list = ["[%s](%s)" % (fileToTitleAndUrl[file_path]["title"], fileToTitleAndUrl[file_path]["url"]) for file_path in file_paths]
-                sources = "\n".join(sources_list)
-                source_msg = "  \nSources:\n" + sources
                 
-                for c in source_msg:
-                    response_msg += c
-                    response_container.write(response_msg)
+                processor = SimilarityPostprocessor(similarity_cutoff=0.25)
+                source_nodes = streaming_response.source_nodes
+                filtered_nodes = processor.postprocess_nodes(source_nodes)
+                sources_list = []
+                for node in filtered_nodes:
+                    try:
+                        file_path = node.metadata["file_path"]
+                        file_name = fileToTitleAndUrl[file_path]["title"]
+                        file_url = fileToTitleAndUrl[file_path]["url"]
+                        source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
+                        sources_list.append(source)
+                    except Exception as e:
+                        # no source wiki node
+                        print(e)
+                        pass
+                if sources_list: 
+                    sources = "  \n".join(sources_list)
+                    source_msg = "  \n  \n***知识库引用***  \n" + sources
+                    
+                    for c in source_msg:
+                        response_msg += c
+                        response_container.write(response_msg)
                 
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
