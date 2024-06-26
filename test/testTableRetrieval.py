@@ -65,7 +65,7 @@ def test_function_performance(model_type, model, input_len, output_len, throughp
         msg = message_content.value
     elif model_type=="claude3.5sonnet":
         message = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3-sonnet-20240229",
             max_tokens=1024,
             messages=[
                 {"role": "user", "content": md_table+"\n"+en_question}

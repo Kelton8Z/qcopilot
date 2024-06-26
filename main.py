@@ -26,7 +26,8 @@ from langsmith import Client, traceable
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
-os.environ["OPENAI_API_BASE"] = "https://vasi.chitu.ai/v1"
+openai_api_base = "https://vasi.chitu.ai/v1"
+os.environ["OPENAI_API_BASE"] = openai_api_base
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 os.environ["LANGCHAIN_PROJECT"] = "stage"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
@@ -57,16 +58,7 @@ openai.api_key = st.secrets.openai_key
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
 os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 
-llm_map = {"claude": Anthropic(model="claude-3-opus-20240229"), 
-           "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
-           "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
-           "ollama": Ollama(model="llama2", request_timeout=60.0)
-}
-Settings.llm = llm_map["gpt4o"]
-demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
-
 st.title(title)
-
     
 def _submit_feedback(user_response, emoji=None, run_id=None):
     feedback = user_response['score']
@@ -95,14 +87,38 @@ def load_data():
         #     embed_batch_size=16,
         # )
         from llama_index.embeddings.openai import OpenAIEmbedding
-        embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+        embed_model = OpenAIEmbedding(model="text-embedding-3-large", api_base=openai_api_base)
         # from llama_index.core import VectorStoreIndex
         # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
         index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index, fileToTitleAndUrl 
     
-index, fileToTitleAndUrl = load_data()
+llm = st.sidebar.selectbox(
+    "模型切换",
+    ("gpt4o", "Claude3.5", "Llama3")
+)
+
+
+llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
+           "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
+           "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
+           "ollama": Ollama(model="llama2", request_timeout=60.0)
+}
+Settings.llm = llm_map[llm]
+demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
+
+use_rag = st.sidebar.selectbox(
+    "是否用知识库",
+    ("是", "否")
+)
+use_rag = True if use_rag=="是" else False
+    
+if use_rag:
+    index, fileToTitleAndUrl = load_data()
+else:
+    from llama_index.core import VectorStoreIndex
+    index = VectorStoreIndex.from_documents([])    
 
 if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
     st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
@@ -180,33 +196,37 @@ def main():
             with st.chat_message("assistant"):
                 response_container = st.empty()  # Container to hold the response as it streams
                 response_msg = ""
-                streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                try:
+                    streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                except:
+                    st.rerun()
                 for token in streaming_response.response_gen:
                     response_msg += token
                     response_container.write(response_msg)
                 
-                processor = SimilarityPostprocessor(similarity_cutoff=0.25)
-                source_nodes = streaming_response.source_nodes
-                filtered_nodes = processor.postprocess_nodes(source_nodes)
-                sources_list = []
-                for node in filtered_nodes:
-                    try:
-                        file_path = node.metadata["file_path"]
-                        file_name = fileToTitleAndUrl[file_path]["title"]
-                        file_url = fileToTitleAndUrl[file_path]["url"]
-                        source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
-                        sources_list.append(source)
-                    except Exception as e:
-                        # no source wiki node
-                        print(e)
-                        pass
-                if sources_list: 
-                    sources = "  \n".join(sources_list)
-                    source_msg = "  \n  \n***知识库引用***  \n" + sources
-                    
-                    for c in source_msg:
-                        response_msg += c
-                        response_container.write(response_msg)
+                if use_rag:
+                    processor = SimilarityPostprocessor(similarity_cutoff=0.25)
+                    source_nodes = streaming_response.source_nodes
+                    filtered_nodes = processor.postprocess_nodes(source_nodes)
+                    sources_list = []
+                    for node in filtered_nodes:
+                        try:
+                            file_path = node.metadata["file_path"]
+                            file_name = fileToTitleAndUrl[file_path]["title"]
+                            file_url = fileToTitleAndUrl[file_path]["url"]
+                            source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
+                            sources_list.append(source)
+                        except Exception as e:
+                            # no source wiki node
+                            print(e)
+                            pass
+                    if sources_list: 
+                        sources = "  \n".join(sources_list)
+                        source_msg = "  \n  \n***知识库引用***  \n" + sources
+                        
+                        for c in source_msg:
+                            response_msg += c
+                            response_container.write(response_msg)
                 
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
