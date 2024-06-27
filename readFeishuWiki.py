@@ -201,11 +201,14 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, doc_type)}
             except:
                 print(f'failed {path}')
-    reader = SimpleDirectoryReader(input_dir=directory, recursive=True, file_extractor={".xlsx": ExcelReader()})
+    
     # automatically sets the metadata of each document according to filename_fn
-    docs = SimpleDirectoryReader(
-        "./data", file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")}
-    ).load_data()
+    reader = SimpleDirectoryReader(
+                input_dir=directory, 
+                recursive=True, 
+                file_extractor={".xlsx": ExcelReader()}, 
+                file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")
+            )
     docs = reader.load_data()
     
     import hashlib
