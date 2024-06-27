@@ -93,42 +93,95 @@ def load_data():
         index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index, fileToTitleAndUrl 
-    
-llm = st.sidebar.selectbox(
-    "模型切换",
-    ("gpt4o", "Claude3.5", "Llama3")
-)
-
+   
 
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
-Settings.llm = llm_map[llm]
-demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
 
-use_rag = st.sidebar.selectbox(
-    "是否用知识库",
-    ("是", "否")
-)
-use_rag = True if use_rag=="是" else False
-    
-if use_rag:
-    index, fileToTitleAndUrl = load_data()
-else:
-    from llama_index.core import VectorStoreIndex
-    index = VectorStoreIndex.from_documents([])    
+def toggle_llm():
+    options = ["gpt4o", "Claude3.5", "Llama3"]
+    disabled_options = ["Llama3"]
 
-if "chat_engine" not in st.session_state.keys(): # Initialize the chat engine
-    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-         
-if "messages" not in st.session_state.keys() or st.sidebar.button("Clear message history"): # Initialize the chat messages history
-    st.session_state.session_id = None
-    st.session_state.run_id = None
-    st.session_state.chat_engine.reset()
-    st.session_state.messages = []
+
+    llm = st.sidebar.selectbox(
+        "模型切换",
+        ("gpt4o", "Claude3.5"),
+        index=1
+    )
+
+    if llm!=st.session_state["llm"]:
+        st.session_state["llm"] = llm
+        Settings.llm = llm_map[llm]
+        st.rerun()
+
+
+def toggle_rag_use():
+    use_rag = st.sidebar.selectbox(
+        "是否用知识库",
+        ("是", "否")
+    )
+    use_rag = True if use_rag=="是" else False
+        
+    if use_rag!= st.session_state.use_rag:
+        if use_rag:
+            index, st.session_state.fileToTitleAndUrl = load_data()
+        else:
+            from llama_index.core import VectorStoreIndex
+            from llama_index.core import Document
+            placeholder_doc = Document(text="blah")
+            index = VectorStoreIndex.from_documents([placeholder_doc])    
+        
+        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+        st.session_state.use_rag = use_rag
+        st.rerun()
+    else:
+        if "chat_engine" not in st.session_state.keys():
+            index, st.session_state.fileToTitleAndUrl = load_data()
+            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+
+def init_chat():
+             
+    if "llm" not in st.session_state.keys(): 
+        st.session_state.llm = "claude3.5"
+    if "use_rag" not in st.session_state.keys(): 
+        st.session_state.use_rag = True
+    if "fileToTitleAndUrl" not in st.session_state.keys(): 
+        st.session_state.fileToTitleAndUrl = {}
     
+    toggle_llm()
+    toggle_rag_use()
+    
+    if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
+        st.session_state.session_id = None
+        st.session_state.run_id = None
+        st.session_state.chat_engine.reset()
+        st.session_state.messages = []
+    
+def starter_prompts():
+    prompt = ""
+    demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
+    selected_prompts = random.sample(demo_prompts, 4)
+
+    st.markdown("""<style>
+    .stButton button {
+        display: inline-block;
+        width: 100%;
+        height: 80px;
+    }
+    </style>""", unsafe_allow_html=True)
+                
+    cols = st.columns(4, vertical_alignment="center")
+    for i, demo_prompt in enumerate(selected_prompts):
+        with cols[i]:
+            if st.button(demo_prompt):
+                prompt = demo_prompt
+                break
+
+    return prompt
+
 @traceable(name=st.session_state.session_id)
 def main():
     run = get_current_run_tree()
@@ -142,25 +195,11 @@ def main():
         "optional_text_label": "Please provide extra information",
     }
     
-    prompt = ""
-    if len(st.session_state.messages)==0:
-        selected_prompts = random.sample(demo_prompts, 4)
+    init_chat()
 
-        st.markdown("""<style>
-        .stButton button {
-            display: inline-block;
-            width: 100%;
-            height: 80px;
-        }
-        </style>""", unsafe_allow_html=True)
-                    
-        cols = st.columns(4, vertical_alignment="center")
-        for i, demo_prompt in enumerate(selected_prompts):
-            with cols[i]:
-                if st.button(demo_prompt):
-                    prompt = demo_prompt
-                    break
-                    
+    prompt = ""
+    if len(st.session_state.messages)==0 and st.session_state.use_rag:
+        prompt = starter_prompts() 
         # col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         # with col4:
         #     if st.button("试试别的问题"):
@@ -204,7 +243,7 @@ def main():
                     response_msg += token
                     response_container.write(response_msg)
                 
-                if use_rag:
+                if st.session_state.use_rag:
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
@@ -212,8 +251,8 @@ def main():
                     for node in filtered_nodes:
                         try:
                             file_path = node.metadata["file_path"]
-                            file_name = fileToTitleAndUrl[file_path]["title"]
-                            file_url = fileToTitleAndUrl[file_path]["url"]
+                            file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
+                            file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
                             source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
                             sources_list.append(source)
                         except Exception as e:
@@ -252,7 +291,9 @@ def main():
                     st.session_state[f"run_{feedback_index}"] = run.id
                     run = cb.latest_run
                     streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
-
-            st.rerun()
+            
+            # clear starter prompts upon convo
+            if len(st.session_state.messages)==2:
+                st.rerun()
         
 main()
