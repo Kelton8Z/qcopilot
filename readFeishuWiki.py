@@ -207,7 +207,7 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 input_dir=directory, 
                 recursive=True, 
                 file_extractor={".xlsx": ExcelReader()}, 
-                file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")
+                file_metadata=lambda filename: {"file_name": fileToTitleAndUrl.get(filename, {}).get("url")}
             )
     docs = reader.load_data()
     
