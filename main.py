@@ -26,10 +26,10 @@ from langsmith import Client, traceable
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
-openai_api_base = "https://vasi.chitu.ai/v1"
+openai_api_base = "http://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_BASE"] = openai_api_base
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-os.environ["LANGCHAIN_PROJECT"] = "stage"
+os.environ["LANGCHAIN_PROJECT"] = "July"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
@@ -98,19 +98,21 @@ def load_data():
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
+           "Llama3_8B": OpenAI(base_url="http://localhost:2512/v1", system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
 def toggle_llm():
-    options = ["gpt4o", "Claude3.5", "Llama3"]
-    disabled_options = ["Llama3"]
-
 
     llm = st.sidebar.selectbox(
         "模型切换",
-        ("gpt4o", "Claude3.5"),
+        ("gpt4o", "Claude3.5", "Llama3_8B"),
         index=1
     )
+    if llm=="Llama3_8B":
+        os.environ["OPENAI_API_KEY"] = "aa"
+    else:
+        os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
@@ -236,7 +238,10 @@ def main():
                 response_container = st.empty()  # Container to hold the response as it streams
                 response_msg = ""
                 try:
-                    streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                    if prompt:
+                        streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                    else:
+                        st.rerun()
                 except:
                     st.rerun()
                 for token in streaming_response.response_gen:
@@ -259,6 +264,7 @@ def main():
                             # no source wiki node
                             print(e)
                             pass
+                    
                     if sources_list: 
                         sources = "  \n".join(sources_list)
                         source_msg = "  \n  \n***知识库引用***  \n" + sources
