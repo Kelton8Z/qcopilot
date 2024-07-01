@@ -1,5 +1,6 @@
 streamlit==1.36.0
 anthropic==0.28.1
+boto3
 openai
 tenacity>=8.2.0,<8.4.0
 llama-index
