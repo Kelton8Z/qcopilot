@@ -23,12 +23,10 @@ from langsmith.run_helpers import get_current_run_tree
 from langchain_core.tracers.context import tracing_v2_enabled
 from langsmith import Client, traceable
 
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
+
+os.environ["USE_PYSQLITE3"] = True
 
 openai_api_base = "https://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_BASE"] = openai_api_base
