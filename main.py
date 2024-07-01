@@ -13,10 +13,10 @@ from functools import partial
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
-from llama_index.core import Settings
+from llama_index.core import Settings, SimpleDirectoryReader
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
-from readFeishuWiki import readWiki
+from readFeishuWiki import readWiki, ExcelReader
 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
@@ -103,7 +103,6 @@ llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_pro
 }
 
 def toggle_llm():
-
     llm = st.sidebar.selectbox(
         "模型切换",
         ("gpt4o", "Claude3.5", "Llama3_8B"),
@@ -121,20 +120,53 @@ def toggle_llm():
 
 
 def toggle_rag_use():
+    
+    from llama_index.core import VectorStoreIndex
+    from llama_index.core import Document
+    placeholder_doc = Document(text="blah")
+    index = VectorStoreIndex.from_documents([placeholder_doc])
+        
     use_rag = st.sidebar.selectbox(
         "是否用知识库",
         ("是", "否")
     )
     use_rag = True if use_rag=="是" else False
+    
+    uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
+    if uploaded_files:
+        use_rag = False
+        from upsertS3 import upload_file, create_bucket, create_presigned_url
+
+        directory = st.session_state.session_id
+        os.makedirs(directory)
+        if st.secrets.aws_region=='us-east-1':
+            region = None
+        else:
+            region = st.secrets.aws_region
+        bucket_created = create_bucket(bucket_name=directory, region=region)
+        if bucket_created:
+            for file in uploaded_files:
+                filename = file.name
+                upload_file(filename, bucket=directory)
+                bytes_data = file.read()
+                with open(filename, 'w') as f:
+                    f.write(bytes_data)
+                
+                s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                
+            reader = SimpleDirectoryReader(
+                        input_dir=directory, 
+                        recursive=True, 
+                        file_extractor={".xlsx": ExcelReader()}, 
+                        file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
+                    )
+            docs = reader.load_data()
+            index = VectorStoreIndex.from_documents(docs)
         
     if use_rag!= st.session_state.use_rag:
         if use_rag:
-            index, st.session_state.fileToTitleAndUrl = load_data()
-        else:
-            from llama_index.core import VectorStoreIndex
-            from llama_index.core import Document
-            placeholder_doc = Document(text="blah")
-            index = VectorStoreIndex.from_documents([placeholder_doc])    
+            index, st.session_state.fileToTitleAndUrl = load_data()                
         
         st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
         st.session_state.use_rag = use_rag
