@@ -7,7 +7,14 @@ import streamlit as st
 aws_access_key_id = st.secrets.aws_access_key
 aws_secret_access_key = st.secrets.aws_secret_key
 
-def create_bucket(bucket_name, region=None):
+if st.secrets.aws_region=='us-east-1':
+    region = None
+else:
+    region = st.secrets.aws_region
+
+s3_client = boto3.client('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
+
+def create_bucket(bucket_name):
     """Create an S3 bucket in a specified region
 
     If a region is not specified, the bucket is created in the S3 default
@@ -20,7 +27,6 @@ def create_bucket(bucket_name, region=None):
 
     # Create bucket
     try:
-        s3_client = boto3.client('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
         if region is None:
             s3_client.create_bucket(Bucket=bucket_name)
         else:
@@ -47,7 +53,6 @@ def upload_file(file_name, bucket, object_name=None):
         object_name = os.path.basename(file_name)
 
     # Upload the file
-    s3_client = boto3.client('s3', aws_access_key_id, aws_secret_access_key)
     try:
         response = s3_client.upload_file(file_name, bucket, object_name)
     except ClientError as e:
@@ -66,7 +71,6 @@ def create_presigned_url(bucket_name, object_name, expiration=3600):
     """
 
     # Generate a presigned URL for the S3 object
-    s3_client = boto3.client('s3', aws_access_key_id, aws_secret_access_key)
     try:
         response = s3_client.generate_presigned_url('get_object',
                                                     Params={'Bucket': bucket_name,

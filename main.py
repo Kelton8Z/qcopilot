@@ -137,24 +137,28 @@ def toggle_rag_use():
         use_rag = False
         from upsertS3 import upload_file, create_bucket, create_presigned_url
 
-        directory = st.session_state.session_id
-        os.makedirs(directory)
         if st.secrets.aws_region=='us-east-1':
             region = None
         else:
             region = st.secrets.aws_region
-        bucket_created = create_bucket(bucket_name=directory, region=region)
+        directory = st.session_state.session_id
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        bucket_created = create_bucket(bucket_name=directory)
         if bucket_created:
             for file in uploaded_files:
                 filename = file.name
-                upload_file(filename, bucket=directory)
                 bytes_data = file.read()
-                with open(filename, 'w') as f:
+                with open("./"+directory+"/"+filename, 'wb') as f:
                     f.write(bytes_data)
                 
-                s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
-                st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
-                
+                uploaded = upload_file(filename, bucket=directory)
+                if uploaded:
+                    s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                    st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                else:
+                    st.write("Failed to upload, try again plz")
+            
             reader = SimpleDirectoryReader(
                         input_dir=directory, 
                         recursive=True, 
