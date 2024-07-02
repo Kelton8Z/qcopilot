@@ -20,7 +20,7 @@ def create_bucket(bucket_name, region=None):
 
     # Create bucket
     try:
-        s3_client = boto3.client('s3', region_name=region, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+        s3_client = boto3.client('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
         if region is None:
             s3_client.create_bucket(Bucket=bucket_name)
         else:
