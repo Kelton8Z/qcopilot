@@ -108,10 +108,7 @@ def toggle_llm():
         ("gpt4o", "Claude3.5", "Llama3_8B"),
         index=1
     )
-    if llm=="Llama3_8B":
-        os.environ["OPENAI_API_KEY"] = "aa"
-    else:
-        os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
+    os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
@@ -167,6 +164,7 @@ def toggle_rag_use():
                     )
             docs = reader.load_data()
             index = VectorStoreIndex.from_documents(docs)
+            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
         
     if use_rag!= st.session_state.use_rag:
         if use_rag:
@@ -193,7 +191,7 @@ def init_chat():
     toggle_rag_use()
     
     if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
-        st.session_state.session_id = None
+        st.session_state['session_id'] = str(uuid.uuid4())
         st.session_state.run_id = None
         st.session_state.chat_engine.reset()
         st.session_state.messages = []
@@ -284,7 +282,7 @@ def main():
                     response_msg += token
                     response_container.write(response_msg)
                 
-                if st.session_state.use_rag:
+                if st.session_state.use_rag or os.path.exists("./"+st.session_state.session_id):
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
