@@ -6,6 +6,9 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.openai import OpenAI 
 
 directory = "./data"
+openai_api_base = "http://vasi.chitu.ai/v1"
+os.environ["OPENAI_API_BASE"] = openai_api_base
+os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 
 ### QUERY GEN
 llm = OpenAI(model="gpt-3.5-turbo-0125", max_tokens=50)
@@ -39,9 +42,6 @@ queryToDoc = {query: doc[0] for query, doc in relevant_docs.items()}
 
 ### INDEXING
 from llama_index.embeddings.openai import OpenAIEmbedding
-openai_api_base = "http://vasi.chitu.ai/v1"
-os.environ["OPENAI_API_BASE"] = openai_api_base
-os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 embed_model = OpenAIEmbedding(model="text-embedding-3-large", api_base=openai_api_base)
 
 reader = SimpleDirectoryReader(
@@ -59,14 +59,15 @@ from langsmith import Client, traceable
 os.environ["LANGCHAIN_PROJECT"] = "source"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
 
-top1hit = 0
-top3hit = 0
-total = len(queries)
 
 @traceable
 def test():
-    for queryID, query in zip(queries.items()):
+    top1hit = 0
+    top3hit = 0
+    total = len(queries)
+    for queryID, query in queries.items():
         streaming_response = st.session_state.chat_engine.stream_chat(query)
         source_nodes = streaming_response.source_nodes
         if source_nodes:
@@ -76,10 +77,11 @@ def test():
         # else:
             
         st.session_state.chat_engine.reset()
+
+    top1HitRate = top1hit/total
+    top3HitRate = top3hit/total
+    print(f'{total} pairs')
+    print(f'{top1HitRate}@1')
+    print(f'{top3HitRate}@3')
         
 test()
-top1HitRate = top1hit/total
-top3HitRate = top3hit/total
-print(f'{total} pairs')
-print(f'{top1HitRate}@1')
-print(f'{top3HitRate}@3')
