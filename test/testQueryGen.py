@@ -53,28 +53,43 @@ index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
 st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
 
 ### EVAL 
-from langchain_core.tracers.context import tracing_v2_enabled
+# from langchain_core.tracers.context import tracing_v2_enabled
 from langsmith import Client, traceable
+from langsmith.run_helpers import get_current_run_tree
 
 os.environ["LANGCHAIN_PROJECT"] = "source"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
-os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
+langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
 
 
 @traceable
 def test():
+    run = get_current_run_tree()
+    run_id = str(run.id)
+    
     top1hit = 0
     top3hit = 0
     total = len(queries)
     for queryID, query in queries.items():
-        streaming_response = st.session_state.chat_engine.stream_chat(query)
-        source_nodes = streaming_response.source_nodes
+        response = st.session_state.chat_engine.chat(query)
+        response_msg = response.response
+        source_nodes = response.source_nodes
         if source_nodes:
             groundtruth_doc = queryToDoc[queryID]
             top1hit += int(source_nodes[0]==groundtruth_doc)
             top3hit += int(groundtruth_doc in source_nodes[:3])
-        # else:
+        
+        import requests
+        
+        requests.patch(
+            f"https://api.smith.langchain.com/runs/{run_id}",
+            json={
+                "inputs": {"text": query},
+                "outputs": {"output": response_msg, "sources": source_nodes},
+            },
+            headers={"x-api-key": langchain_api_key},
+        )
             
         st.session_state.chat_engine.reset()
 
