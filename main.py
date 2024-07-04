@@ -132,7 +132,7 @@ def toggle_rag_use():
     uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
     if uploaded_files:
         use_rag = False
-        from upsertS3 import upload_file, create_bucket, create_presigned_url
+        from upsertS3 import put_object, upload_file, create_bucket, create_presigned_url
 
         directory = st.session_state.session_id
         os.makedirs(directory)
@@ -144,16 +144,17 @@ def toggle_rag_use():
         if bucket_created:
             for file in uploaded_files:
                 filename = file.name
-                upload_file(filename, bucket=directory)
                 bytes_data = file.read()
-                with open(filename, 'w') as f:
-                    f.write(bytes_data)
-                
+                put_object(obj=bytes_data, bucket=directory, key=filename)
                 s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
                 st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
                 
+            from s3fs import S3FileSystem
+            endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
+            s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
             reader = SimpleDirectoryReader(
                         input_dir=directory, 
+                        fs=s3fs,
                         recursive=True, 
                         file_extractor={".xlsx": ExcelReader()}, 
                         file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}

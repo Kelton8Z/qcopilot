@@ -14,7 +14,7 @@ else:
 
 s3_client = boto3.client('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
 
-def create_bucket(bucket_name):
+def create_bucket(bucket_name, region=None):
     """Create an S3 bucket in a specified region
 
     If a region is not specified, the bucket is created in the S3 default
@@ -60,6 +60,8 @@ def upload_file(file_name, bucket, object_name=None):
         return False
     return True
 
+def put_object(obj, bucket, key):
+    s3_client.put_object(Body=obj, Bucket=bucket, Key=key)
 
 def create_presigned_url(bucket_name, object_name, expiration=3600):
     """Generate a presigned URL to share an S3 object
