@@ -18,7 +18,8 @@ from llama_index.core.chat_engine import SimpleChatEngine
 
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
-from readFeishuWiki import readWiki, ExcelReader
+from readFeishuWiki import readWiki, ExcelReader, TsvReader
+from S3ops import put_object, upload_file, create_bucket, create_presigned_url, delete_all_objects, delete_bucket
 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
@@ -31,6 +32,11 @@ st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initia
 openai_api_base = "http://vasi.chitu.ai/v1"
 os.environ["OPENAI_API_BASE"] = openai_api_base
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
+
+
+os.environ["AWS_ACCESS_KEY_ID"] = st.secrets.aws_access_key
+os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets.aws_secret_key
+
 os.environ["LANGCHAIN_PROJECT"] = "July"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
@@ -132,10 +138,10 @@ def toggle_rag_use():
     uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
     if uploaded_files:
         use_rag = False
-        from upsertS3 import put_object, upload_file, create_bucket, create_presigned_url
 
         directory = st.session_state.session_id
-        os.makedirs(directory)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         if st.secrets.aws_region=='us-east-1':
             region = None
         else:
@@ -148,25 +154,28 @@ def toggle_rag_use():
                 put_object(obj=bytes_data, bucket=directory, key=filename)
                 s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
                 st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
-                
+            st.toast("上传成功！")    
+            
             from s3fs import S3FileSystem
+            import boto3
             endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
             s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
             reader = SimpleDirectoryReader(
                         input_dir=directory, 
                         fs=s3fs,
                         recursive=True, 
-                        file_extractor={".xlsx": ExcelReader()}, 
+                        file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
                         file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
                     )
             docs = reader.load_data()
             index = VectorStoreIndex.from_documents(docs)
+            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
     
     if use_rag!= st.session_state.use_rag:
         if use_rag:
             index, st.session_state.fileToTitleAndUrl = load_data()                
             st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-        else:
+        elif not uploaded_files:
             st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
         st.session_state.use_rag = use_rag
         st.rerun()
@@ -191,6 +200,9 @@ def init_chat():
     toggle_rag_use()
     
     if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
+        if st.session_state.session_id:
+            bucket = st.session_state.session_id 
+
         st.session_state.session_id = None
         st.session_state.run_id = None
         st.session_state.chat_engine.reset()
@@ -311,7 +323,7 @@ def main():
                 st.session_state.messages.append(message) # Add response to message history
                 
                 # log nonnull converstaion to langsmith
-                if prompt and response_msg:
+                _ = '''if prompt and response_msg:
                     print(f'{prompt} -> {response_msg}')
                     requests.patch(
                         f"https://api.smith.langchain.com/runs/{run_id}",
@@ -322,7 +334,7 @@ def main():
                         },
                         headers={"x-api-key": langchain_api_key},
                     )
-                    
+                ''' 
                 # st.rerun()
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(

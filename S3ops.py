@@ -6,13 +6,12 @@ import streamlit as st
 
 aws_access_key_id = st.secrets.aws_access_key
 aws_secret_access_key = st.secrets.aws_secret_key
-
-if st.secrets.aws_region=='us-east-1':
-    region = None
-else:
-    region = st.secrets.aws_region
+os.environ["AWS_ACCESS_KEY_ID"] = aws_access_key_id
+os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_access_key
+region = st.secrets.aws_region
 
 s3_client = boto3.client('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
+s3_resource = boto3.resource('s3', region_name=region, api_version=None, use_ssl=None, verify=None, endpoint_url=None, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=None, config=None)
 
 def create_bucket(bucket_name, region=None):
     """Create an S3 bucket in a specified region
@@ -84,3 +83,21 @@ def create_presigned_url(bucket_name, object_name, expiration=3600):
 
     # The response contains the presigned URL
     return response
+
+def delete_all_objects(bucket_name):
+    """
+    Delete all objects in an S3 bucket.
+    """
+    bucket = s3_resource.Bucket(bucket_name)
+    bucket.object_versions.delete()  # Deletes all versions of all objects
+
+def delete_bucket(bucket_name):
+    """
+    Delete an S3 bucket after deleting all objects in it.
+    """
+    try:
+        # Attempt to delete the bucket
+        s3_client.delete_bucket(Bucket=bucket_name)
+        print(f'Bucket {bucket_name} deleted successfully.')
+    except Exception as e:
+        print(f'Error: {e}')

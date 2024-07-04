@@ -22,6 +22,12 @@ collection = "qcWiki"
 chroma_db_path = "chroma_db"
 fileToTitleAndUrl = {}
 
+
+class TsvReader(BaseReader):
+    def load_data(self, file_path: str, extra_info: dict = None):
+        data = pd.read_csv(file_path, sep='\t').to_string()
+        return [Document(text=data, metadata=extra_info)]
+
 class ExcelReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
         data = pd.read_excel(file_path).to_string()
