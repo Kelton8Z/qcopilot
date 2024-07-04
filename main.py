@@ -14,6 +14,8 @@ from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 from llama_index.core import Settings, SimpleDirectoryReader
+from llama_index.core.chat_engine import SimpleChatEngine
+
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
 from readFeishuWiki import readWiki, ExcelReader
@@ -98,7 +100,7 @@ def load_data():
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
-           "Llama3_8B": OpenAI(base_url="http://localhost:2512/v1", system_prompt=prompt),
+           "Llama3_8B": OpenAI(base_url="http://localhost:25121/v1", system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
@@ -120,8 +122,6 @@ def toggle_rag_use():
     
     from llama_index.core import VectorStoreIndex
     from llama_index.core import Document
-    placeholder_doc = Document(text="blah")
-    index = VectorStoreIndex.from_documents([placeholder_doc])
         
     use_rag = st.sidebar.selectbox(
         "是否用知识库",
@@ -134,28 +134,24 @@ def toggle_rag_use():
         use_rag = False
         from upsertS3 import upload_file, create_bucket, create_presigned_url
 
+        directory = st.session_state.session_id
+        os.makedirs(directory)
         if st.secrets.aws_region=='us-east-1':
             region = None
         else:
             region = st.secrets.aws_region
-        directory = st.session_state.session_id
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        bucket_created = create_bucket(bucket_name=directory)
+        bucket_created = create_bucket(bucket_name=directory, region=region)
         if bucket_created:
             for file in uploaded_files:
                 filename = file.name
+                upload_file(filename, bucket=directory)
                 bytes_data = file.read()
-                with open("./"+directory+"/"+filename, 'wb') as f:
+                with open(filename, 'w') as f:
                     f.write(bytes_data)
                 
-                uploaded = upload_file(filename, bucket=directory)
-                if uploaded:
-                    s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
-                    st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
-                else:
-                    st.write("Failed to upload, try again plz")
-            
+                s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                
             reader = SimpleDirectoryReader(
                         input_dir=directory, 
                         recursive=True, 
@@ -164,19 +160,22 @@ def toggle_rag_use():
                     )
             docs = reader.load_data()
             index = VectorStoreIndex.from_documents(docs)
-            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-        
+    
     if use_rag!= st.session_state.use_rag:
         if use_rag:
             index, st.session_state.fileToTitleAndUrl = load_data()                
-        
-        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+        else:
+            st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
         st.session_state.use_rag = use_rag
         st.rerun()
     else:
         if "chat_engine" not in st.session_state.keys():
-            index, st.session_state.fileToTitleAndUrl = load_data()
-            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+            if use_rag:
+                index, st.session_state.fileToTitleAndUrl = load_data()                
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+            else:
+                st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
 
 def init_chat():
              
@@ -191,7 +190,7 @@ def init_chat():
     toggle_rag_use()
     
     if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
-        st.session_state['session_id'] = str(uuid.uuid4())
+        st.session_state.session_id = None
         st.session_state.run_id = None
         st.session_state.chat_engine.reset()
         st.session_state.messages = []
@@ -282,7 +281,7 @@ def main():
                     response_msg += token
                     response_container.write(response_msg)
                 
-                if st.session_state.use_rag or os.path.exists("./"+st.session_state.session_id):
+                if st.session_state.use_rag:
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
