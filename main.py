@@ -140,49 +140,48 @@ def toggle_rag_use():
    
     uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
     if st.session_state.uploaded_files!=uploaded_files:
-        with st.status(label="上传处理中", expanded=True) as status:
-            st.session_state.uploaded_files = uploaded_files
-            st.write("上传云端")
-            use_rag = False
+        st.session_state.uploaded_files = uploaded_files
+        if uploaded_files:
+            with st.status(label="上传处理中", expanded=True) as status:
+                st.write("上传云端")
+                use_rag = False
 
-            directory = st.session_state.session_id
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-            if st.secrets.aws_region=='us-east-1':
-                region = None
-            else:
-                region = st.secrets.aws_region
-            
-            # handle uploading more files to the same bucket within the same session
-            bucket_created = False
-            is_bucket_exist = bucket_exists(directory)
-            if not is_bucket_exist:
-                bucket_created = create_bucket(bucket_name=directory, region=region)
-            if bucket_created or is_bucket_exist:
-                for file in uploaded_files:
-                    filename = file.name
-                    bytes_data = file.read()
-                    put_object(obj=bytes_data, bucket=directory, key=filename)
-                    s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
-                    st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
-                st.write("向量索引")    
+                directory = st.session_state.session_id
+                if st.secrets.aws_region=='us-east-1':
+                    region = None
+                else:
+                    region = st.secrets.aws_region
                 
-                from s3fs import S3FileSystem
-                import boto3
-                endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
-                s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
-                reader = SimpleDirectoryReader(
-                            input_dir=directory, 
-                            fs=s3fs,
-                            recursive=True, 
-                            file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
-                            file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
-                        )
-                docs = reader.load_data()
-                index = VectorStoreIndex.from_documents(docs)
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-    
-            status.update(label="上传完成", state="complete", expanded=False)
+                # handle uploading more files to the same bucket within the same session
+                bucket_created = False
+                is_bucket_exist = bucket_exists(directory)
+                if not is_bucket_exist:
+                    bucket_created = create_bucket(bucket_name=directory, region=region)
+                if bucket_created or is_bucket_exist:
+                    for file in uploaded_files:
+                        filename = file.name
+                        bytes_data = file.read()
+                        put_object(obj=bytes_data, bucket=directory, key=filename)
+                        s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                        st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                    st.write("向量索引")    
+                    
+                    from s3fs import S3FileSystem
+                    import boto3
+                    endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
+                    s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
+                    reader = SimpleDirectoryReader(
+                                input_dir=directory, 
+                                fs=s3fs,
+                                recursive=True, 
+                                file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
+                                file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
+                            )
+                    docs = reader.load_data()
+                    index = VectorStoreIndex.from_documents(docs)
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+        
+                status.update(label="上传完成", state="complete", expanded=False)
 
     if use_rag!= st.session_state.use_rag:
         if use_rag:
@@ -213,10 +212,6 @@ def init_chat():
     toggle_rag_use()
     
     if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
-        if st.session_state.session_id:
-            bucket = st.session_state.session_id 
-
-        st.session_state.session_id = None
         st.session_state.run_id = None
         st.session_state.chat_engine.reset()
         st.session_state.messages = []
@@ -307,7 +302,7 @@ def main():
                     response_msg += token
                     response_container.write(response_msg)
                 
-                if st.session_state.use_rag:
+                if st.session_state.use_rag or st.session_state.uploaded_files:
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
