@@ -101,3 +101,9 @@ def delete_bucket(bucket_name):
         print(f'Bucket {bucket_name} deleted successfully.')
     except Exception as e:
         print(f'Error: {e}')
+
+def bucket_exists(bucket):
+    response = s3_client.list_buckets()
+    buckets = response['Buckets']
+    buckets = [b['Name'] for b in buckets]
+    return bucket in buckets
