@@ -125,7 +125,6 @@ def toggle_llm():
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
         Settings.llm = llm_map[llm]
-        st.rerun()
 
 
 def toggle_rag_use():
@@ -134,64 +133,23 @@ def toggle_rag_use():
     from llama_index.core import Document
         
     use_rag = st.sidebar.selectbox(
-        "是否用知识库",
+        "是否用飞书知识库",
         ("是", "否")
     )
     use_rag = True if use_rag=="是" else False
    
-    uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
-    if st.session_state.uploaded_files!=uploaded_files:
-        st.session_state.uploaded_files = uploaded_files
-        if uploaded_files:
-            with st.status(label="上传处理中", expanded=True) as status:
-                st.write("上传云端")
-                use_rag = False
-
-                directory = st.session_state.session_id
-                if st.secrets.aws_region=='us-east-1':
-                    region = None
-                else:
-                    region = st.secrets.aws_region
-                
-                # handle uploading more files to the same bucket within the same session
-                bucket_created = False
-                is_bucket_exist = bucket_exists(directory)
-                if not is_bucket_exist:
-                    bucket_created = create_bucket(bucket_name=directory, region=region)
-                if bucket_created or is_bucket_exist:
-                    for file in uploaded_files:
-                        filename = file.name
-                        bytes_data = file.read()
-                        put_object(obj=bytes_data, bucket=directory, key=filename)
-                        s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
-                        st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
-                    st.write("向量索引")    
-                    
-                    from s3fs import S3FileSystem
-                    import boto3
-                    endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
-                    s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
-                    reader = SimpleDirectoryReader(
-                                input_dir=directory, 
-                                fs=s3fs,
-                                recursive=True, 
-                                file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
-                                file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
-                            )
-                    docs = reader.load_data()
-                    index = VectorStoreIndex.from_documents(docs)
-                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-        
-                status.update(label="上传完成", state="complete", expanded=False)
 
     if use_rag!= st.session_state.use_rag:
+        st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
         if use_rag:
             index, fileToTitleAndUrl = load_data()                
             if index:
                 st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
                 st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-        elif not uploaded_files:
-            st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
+            else:
+                st.toast("调用飞书知识库失败")
+                use_rag = False
+        
         st.session_state.use_rag = use_rag
         st.rerun()
     else:
@@ -202,6 +160,52 @@ def toggle_rag_use():
                 if index:
                     st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
                     st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+
+    if not use_rag:
+        uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
+        if st.session_state.uploaded_files!=uploaded_files:
+            st.session_state.uploaded_files = uploaded_files
+            if uploaded_files:
+                with st.status(label="上传处理中", expanded=True) as status:
+                    st.write("上传云端")
+                    use_rag = False
+
+                    directory = st.session_state.session_id
+                    if st.secrets.aws_region=='us-east-1':
+                        region = None
+                    else:
+                        region = st.secrets.aws_region
+                    
+                    # handle uploading more files to the same bucket within the same session
+                    bucket_created = False
+                    is_bucket_exist = bucket_exists(directory)
+                    if not is_bucket_exist:
+                        bucket_created = create_bucket(bucket_name=directory, region=region)
+                    if bucket_created or is_bucket_exist:
+                        for file in uploaded_files:
+                            filename = file.name
+                            bytes_data = file.read()
+                            put_object(obj=bytes_data, bucket=directory, key=filename)
+                            s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                            st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                        st.write("向量索引")    
+                        
+                        from s3fs import S3FileSystem
+                        import boto3
+                        endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
+                        s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
+                        reader = SimpleDirectoryReader(
+                                    input_dir=directory, 
+                                    fs=s3fs,
+                                    recursive=True, 
+                                    file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
+                                    file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
+                                )
+                        docs = reader.load_data()
+                        index = VectorStoreIndex.from_documents(docs)
+                        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+            
+                    status.update(label="上传完成", state="complete", expanded=False)
 
 def init_chat():
              
@@ -349,7 +353,7 @@ def main():
                     )
                 ''' 
                 # st.rerun()
-                '''
+                _ = '''
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
                         (len(st.session_state.messages) - 1) / 2
