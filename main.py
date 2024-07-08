@@ -185,19 +185,22 @@ def toggle_rag_use():
 
     if use_rag!= st.session_state.use_rag:
         if use_rag:
-            index, st.session_state.fileToTitleAndUrl = load_data()                
-            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+            index, fileToTitleAndUrl = load_data()                
+            if index:
+                st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
         elif not uploaded_files:
             st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
         st.session_state.use_rag = use_rag
         st.rerun()
     else:
         if "chat_engine" not in st.session_state.keys():
+            st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
             if use_rag:
-                index, st.session_state.fileToTitleAndUrl = load_data()                
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-            else:
-                st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
+                index, fileToTitleAndUrl = load_data()                
+                if index:
+                    st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
 
 def init_chat():
              
