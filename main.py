@@ -24,7 +24,7 @@ from S3ops import put_object, upload_file, create_bucket, create_presigned_url, 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
 from langchain_core.tracers.context import tracing_v2_enabled
-from langsmith import Client, traceable
+#from langsmith import Client, traceable
 
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
@@ -43,7 +43,7 @@ os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
 
 langsmith_project_id = st.secrets.langsmith_project_id
-langsmith_client = Client(api_key=langchain_api_key)
+#langsmith_client = Client(api_key=langchain_api_key)
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
@@ -70,7 +70,7 @@ os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
 os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 
 st.title(title)
-    
+_ = '''    
 def _submit_feedback(user_response, emoji=None, run_id=None):
     feedback = user_response['score']
     feedback_text = user_response['text']
@@ -84,6 +84,7 @@ def _submit_feedback(user_response, emoji=None, run_id=None):
             comment=f'{messages[-2]["content"]} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
         )
     return user_response
+'''
 
 @st.cache_resource(show_spinner=False)
 def load_data():
@@ -241,12 +242,13 @@ def starter_prompts():
 
     return prompt
 
-@traceable(name=st.session_state.session_id)
+#@traceable(name=st.session_state.session_id)
 def main():
+    '''
     run = get_current_run_tree()
     run_id = str(run.id)
     st.session_state.run_id = st.session_state["run_0"] = run_id
-    
+    '''
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
 
     feedback_kwargs = {
@@ -275,7 +277,7 @@ def main():
         with st.chat_message(message["role"]):
             st.write(message["content"])
             
-    
+        _ = ''' 
         if message["role"]=="assistant":
             feedback_key = f"feedback_{int(i/2)}"
             # This actually commits the feedback
@@ -286,6 +288,7 @@ def main():
                     _submit_feedback, run_id=st.session_state[f"run_{int(i/2)}"]
                 ),
             )
+        '''
 
     if st.session_state.messages:
         message = st.session_state.messages[-1]
@@ -321,7 +324,6 @@ def main():
                             # no source wiki node
                             print(e)
                             pass
-                    
                     if sources_list: 
                         sources = "  \n".join(sources_list)
                         source_msg = "  \n  \n***知识库引用***  \n" + sources
@@ -347,6 +349,7 @@ def main():
                     )
                 ''' 
                 # st.rerun()
+                '''
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
                         (len(st.session_state.messages) - 1) / 2
@@ -354,7 +357,7 @@ def main():
                     st.session_state[f"run_{feedback_index}"] = run.id
                     run = cb.latest_run
                     streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
-            
+                '''
             # clear starter prompts upon convo
             if len(st.session_state.messages)==2:
                 st.rerun()
