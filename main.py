@@ -117,8 +117,7 @@ llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_pro
 def toggle_llm():
     llm = st.sidebar.selectbox(
         "模型切换",
-        ("gpt4o", "Claude3.5", "Llama3_8B"),
-        index=1
+        ("gpt4o", "Claude3.5", "Llama3_8B")
     )
     os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 
@@ -164,6 +163,10 @@ def toggle_rag_use():
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
         if st.session_state.uploaded_files!=uploaded_files:
+            old_files = [file.name for file in st.session_state.uploaded_files]
+            cur_files = [file.name for file in uploaded_files]
+            new_filenames = list(set(cur_files)-set(old_files))
+            new_files = [file for file in uploaded_files if file.name in new_filenames] 
             st.session_state.uploaded_files = uploaded_files
             if uploaded_files:
                 with st.status(label="上传处理中", expanded=True) as status:
@@ -177,40 +180,65 @@ def toggle_rag_use():
                         region = st.secrets.aws_region
                     
                     # handle uploading more files to the same bucket within the same session
+                    success = False
                     bucket_created = False
                     is_bucket_exist = bucket_exists(directory)
                     if not is_bucket_exist:
                         bucket_created = create_bucket(bucket_name=directory, region=region)
                     if bucket_created or is_bucket_exist:
-                        for file in uploaded_files:
+                        for file in new_files:
                             filename = file.name
+                            filepath = directory+"/"+filename
                             bytes_data = file.read()
                             put_object(obj=bytes_data, bucket=directory, key=filename)
                             s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
-                            st.session_state.fileToTitleAndUrl[filename] = {"url": s3_url}
+                            st.session_state.fileToTitleAndUrl[filepath] = {"title": filename, "url": s3_url}
+                    
                         st.write("向量索引")    
                         
                         from s3fs import S3FileSystem
                         import boto3
                         endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
                         s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
-                        reader = SimpleDirectoryReader(
-                                    input_dir=directory, 
-                                    fs=s3fs,
-                                    recursive=True, 
-                                    file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
-                                    file_metadata=lambda filename: {"file_name": st.session_state.fileToTitleAndUrl.get(filename, {}).get("url")}
-                                )
-                        docs = reader.load_data()
-                        index = VectorStoreIndex.from_documents(docs)
-                        st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-            
-                    status.update(label="上传完成", state="complete", expanded=False)
+                        
+                        max_retries = 5
+                        retry_delay = 2  # seconds
+                        for attempt in range(max_retries):
+                            try:
+                                reader = SimpleDirectoryReader(
+                                            input_dir=directory, 
+                                            fs=s3fs,
+                                            recursive=True, 
+                                            filename_as_id=True,
+                                            file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
+                                            file_metadata=lambda filename: {"file_name": filename},
+                                            raise_on_error=True
+                                        )
+                                docs = reader.load_data()
+                                success = True
+                                break  # Exit the loop if successful
+                            except Exception as e:
+                                if attempt < max_retries - 1:
+                                    st.warning(f"File not loaded, retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                                    import time
+                                    time.sleep(retry_delay)
+                                else:
+                                    st.error(f"Failed to load file after {max_retries} attempts.")
+                        try:
+                            index = VectorStoreIndex.from_documents(docs)
+                            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                        except:
+                            success = False
+
+                    if success:
+                        status.update(label="上传完成", state="complete", expanded=False)
+                    else:
+                        status.update(label="上传失败", state="error", expanded=False)
 
 def init_chat():
              
     if "llm" not in st.session_state.keys(): 
-        st.session_state.llm = "claude3.5"
+        st.session_state.llm = "gpt4o"
     if "use_rag" not in st.session_state.keys(): 
         st.session_state.use_rag = True
     if "fileToTitleAndUrl" not in st.session_state.keys(): 
@@ -223,7 +251,7 @@ def init_chat():
         st.session_state.run_id = None
         st.session_state.chat_engine.reset()
         st.session_state.messages = []
-    
+
 def starter_prompts():
     prompt = ""
     demo_prompts = ["应该如何衡量decode和prefill过程的性能?", "AI Infra行业发展的目标是什么?", "JSX有什么优势?", "怎么实现capcha/防ai滑块?", "官网首页展示有哪些前端方案?", "我们的前端开发面试考察些什么?", "介绍一下CHT830项目", "llama模型平均吞吐量(token/s)多少?"]
@@ -317,9 +345,12 @@ def main():
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
                     sources_list = []
-                    for node in filtered_nodes:
+                    for node in source_nodes:
                         try:
-                            file_path = node.metadata["file_path"]
+                            if "file_path" in node.metadata:
+                                file_path = node.metadata["file_path"]
+                            else:
+                                file_path = node.metadata["file_name"]
                             file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
                             file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
                             source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
