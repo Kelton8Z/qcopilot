@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import random
 import asyncio
@@ -9,6 +10,7 @@ from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
 import openai
+from multiprocessing import Process, Queue, set_start_method
 from functools import partial
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
@@ -126,6 +128,30 @@ def toggle_llm():
         Settings.llm = llm_map[llm]
 
 
+def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
+    for attempt in range(max_retries):
+        try:
+            reader = SimpleDirectoryReader(
+                input_dir=directory,
+                fs=s3fs,
+                recursive=True,
+                filename_as_id=True,
+                file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()},
+                file_metadata=lambda filename: {"file_name": filename},
+                raise_on_error=True
+            )
+            docs = reader.load_data()
+            queue.put(docs)
+            return  # Exit the function if successful
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"File not loaded, retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                queue.put(None)
+                print(f"Failed to load file after {max_retries} attempts: {e}")
+                return
+
 def toggle_rag_use():
     
     from llama_index.core import VectorStoreIndex
@@ -133,7 +159,7 @@ def toggle_rag_use():
         
     use_rag = st.sidebar.selectbox(
         "是否用飞书知识库",
-        ("是", "否")
+        ("否", "是")
     )
     use_rag = True if use_rag=="是" else False
    
@@ -200,35 +226,35 @@ def toggle_rag_use():
                         import boto3
                         endpoint = boto3.client("s3", region_name=st.secrets.aws_region).meta.endpoint_url
                         s3fs = S3FileSystem(anon=False, endpoint_url=endpoint)
-                        
+                       
+                        set_start_method('spawn', force=True)
+
                         max_retries = 5
                         retry_delay = 2  # seconds
-                        for attempt in range(max_retries):
+                        
+                        queue = Queue()
+
+                        # Create and start the subprocess
+                        process = Process(target=read_documents, args=(directory, s3fs, queue, max_retries, retry_delay))
+                        process.start()
+
+                        # Wait for the process to complete
+                        process.join()
+
+                        # Retrieve the result from the queue
+                        docs = queue.get()
+
+                        # Ensure the subprocess is terminated
+                        if process.is_alive():
+                            process.terminate()
+
+                        if docs:
                             try:
-                                reader = SimpleDirectoryReader(
-                                            input_dir=directory, 
-                                            fs=s3fs,
-                                            recursive=True, 
-                                            filename_as_id=True,
-                                            file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()}, 
-                                            file_metadata=lambda filename: {"file_name": filename},
-                                            raise_on_error=True
-                                        )
-                                docs = reader.load_data()
+                                index = VectorStoreIndex.from_documents(docs)
+                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
                                 success = True
-                                break  # Exit the loop if successful
-                            except Exception as e:
-                                if attempt < max_retries - 1:
-                                    st.warning(f"File not loaded, retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                                    import time
-                                    time.sleep(retry_delay)
-                                else:
-                                    st.error(f"Failed to load file after {max_retries} attempts.")
-                        try:
-                            index = VectorStoreIndex.from_documents(docs)
-                            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
-                        except:
-                            success = False
+                            except:
+                                success = False
 
                     if success:
                         status.update(label="上传完成", state="complete", expanded=False)
