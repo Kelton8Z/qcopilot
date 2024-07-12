@@ -31,10 +31,9 @@ from langchain_core.tracers.context import tracing_v2_enabled
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
+llama3_api_base = "http://localhost:25121/v1"
 openai_api_base = "http://vasi.chitu.ai/v1"
-os.environ["OPENAI_API_BASE"] = openai_api_base
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-
 
 os.environ["AWS_ACCESS_KEY_ID"] = st.secrets.aws_access_key
 os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets.aws_secret_key
@@ -112,7 +111,7 @@ def load_data():
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
            "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
            "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
-           "Llama3_8B": OpenAI(base_url="http://localhost:25121/v1", system_prompt=prompt),
+           "Llama3_8B": OpenAI(base_url=llama3_api_base, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
@@ -122,11 +121,15 @@ def toggle_llm():
         ("gpt4o", "Claude3.5", "Llama3_8B")
     )
     os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-
+    if llm=="Llama3_8B": 
+        os.environ["OPENAI_API_BASE"] = llama3_api_base
+    else:
+        os.environ["OPENAI_API_BASE"] = openai_api_base
+    
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
         Settings.llm = llm_map[llm]
-
+        st.toast(f'Switched to {llm}')
 
 def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
     for attempt in range(max_retries):
@@ -170,7 +173,7 @@ def toggle_rag_use():
             index, fileToTitleAndUrl = load_data()                
             if index:
                 st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
             else:
                 st.toast("调用飞书知识库失败")
                 use_rag = False
@@ -184,7 +187,7 @@ def toggle_rag_use():
                 index, fileToTitleAndUrl = load_data()                
                 if index:
                     st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
 
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
@@ -251,7 +254,7 @@ def toggle_rag_use():
                         if docs:
                             try:
                                 index = VectorStoreIndex.from_documents(docs)
-                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
                                 success = True
                             except:
                                 success = False
@@ -357,6 +360,8 @@ def main():
                 response_msg = ""
                 try:
                     if prompt:
+                        print(st.session_state["llm"])
+                        print(Settings.llm)
                         streaming_response = st.session_state.chat_engine.stream_chat(prompt)
                     else:
                         st.rerun()
