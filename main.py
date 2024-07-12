@@ -170,7 +170,7 @@ def toggle_rag_use():
             index, fileToTitleAndUrl = load_data()                
             if index:
                 st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
             else:
                 st.toast("调用飞书知识库失败")
                 use_rag = False
@@ -184,7 +184,7 @@ def toggle_rag_use():
                 index, fileToTitleAndUrl = load_data()                
                 if index:
                     st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
 
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
@@ -251,7 +251,7 @@ def toggle_rag_use():
                         if docs:
                             try:
                                 index = VectorStoreIndex.from_documents(docs)
-                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", streaming=True)
+                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
                                 success = True
                             except:
                                 success = False
