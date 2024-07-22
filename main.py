@@ -17,7 +17,8 @@ from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 from llama_index.core import Settings, SimpleDirectoryReader
 from llama_index.core.chat_engine import SimpleChatEngine
-
+from llama_index.llms.azure_openai import AzureOpenAI
+from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
 from readFeishuWiki import readWiki, ExcelReader, TsvReader
@@ -31,10 +32,9 @@ from langchain_core.tracers.context import tracing_v2_enabled
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
+llama3_api_base = "http://localhost:25121/v1"
 openai_api_base = "http://vasi.chitu.ai/v1"
-os.environ["OPENAI_API_BASE"] = openai_api_base
 os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-
 
 os.environ["AWS_ACCESS_KEY_ID"] = st.secrets.aws_access_key
 os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets.aws_secret_key
@@ -46,6 +46,12 @@ langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
 
 langsmith_project_id = st.secrets.langsmith_project_id
 #langsmith_client = Client(api_key=langchain_api_key)
+
+api_version="2024-02-01"
+azure_api_key = st.secrets.azure_api_key
+azure_endpoint = st.secrets.azure_endpoint
+azure_chat_deployment = st.secrets.azure_chat_deployment
+azure_embedding_deployment = st.secrets.azure_embedding_deployment
 
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
@@ -93,26 +99,33 @@ def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
-        # recursively read wiki and write each file into the machine
-        # from llama_index.embeddings.jinaai import JinaEmbedding
-        # embed_model = JinaEmbedding(
-        #     api_key=st.secrets.jinaai_key,
-        #     model="jina-embeddings-v2-base-en",
-        #     embed_batch_size=16,
-        # )
-        from llama_index.embeddings.openai import OpenAIEmbedding
-        embed_model = OpenAIEmbedding(model="text-embedding-3-large", api_base=openai_api_base)
-        # from llama_index.core import VectorStoreIndex
-        # index = VectorStoreIndex.from_documents([], embed_model=embed_model)
+        embed_model = AzureOpenAIEmbedding(
+            model="text-embedding-ada-002",
+            deployment_name=azure_embedding_deployment,
+            api_key=azure_api_key,
+            azure_endpoint=azure_endpoint,
+            api_version=api_version,
+        )
         index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index, fileToTitleAndUrl 
-   
-
+  
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
-           "gpt4o": OpenAI(model="gpt-4o", system_prompt=prompt),
-           "gpt3.5": OpenAI(model="gpt-3.5-turbo", temperature=0.5, system_prompt=prompt),
-           "Llama3_8B": OpenAI(base_url="http://localhost:25121/v1", system_prompt=prompt),
+           "gpt4o": AzureOpenAI(model="gpt-4o", 
+               system_prompt=prompt,
+                engine=azure_chat_deployment,
+                api_key=azure_api_key,  
+                api_version=api_version,
+                azure_endpoint = azure_endpoint,
+            ),
+           "gpt3.5":  AzureOpenAI(model="gpt-3.5-turbo", 
+                engine=azure_chat_deployment,
+                api_key=azure_api_key,  
+                api_version=api_version,
+                azure_endpoint = azure_endpoint,
+                system_prompt=prompt
+            ),
+           "Llama3_8B": OpenAI(base_url=llama3_api_base, system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
@@ -122,11 +135,15 @@ def toggle_llm():
         ("gpt4o", "Claude3.5", "Llama3_8B")
     )
     os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
-
+    if llm=="Llama3_8B": 
+        os.environ["OPENAI_API_BASE"] = llama3_api_base
+    else:
+        os.environ["OPENAI_API_BASE"] = openai_api_base
+    
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
         Settings.llm = llm_map[llm]
-
+        st.toast(f'Switched to {llm}')
 
 def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
     for attempt in range(max_retries):
@@ -357,6 +374,8 @@ def main():
                 response_msg = ""
                 try:
                     if prompt:
+                        print(st.session_state["llm"])
+                        print(Settings.llm)
                         streaming_response = st.session_state.chat_engine.stream_chat(prompt)
                     else:
                         st.rerun()
