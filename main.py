@@ -171,8 +171,7 @@ def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
 
 def toggle_rag_use():
     
-    from llama_index.core import VectorStoreIndex
-    from llama_index.core import Document
+    from llama_index.core import VectorStoreIndex, Document
         
     use_rag = st.sidebar.selectbox(
         "是否用飞书知识库",
@@ -389,7 +388,7 @@ def main():
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
-                    sources_list = []
+                    sources = set()
                     for node in source_nodes:
                         try:
                             if "file_path" in node.metadata:
@@ -399,13 +398,13 @@ def main():
                             file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
                             file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
                             source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
-                            sources_list.append(source)
+                            sources.add(source)
                         except Exception as e:
                             # no source wiki node
                             print(e)
                             pass
-                    if sources_list: 
-                        sources = "  \n".join(sources_list)
+                    if sources: 
+                        sources = "  \n".join(sources)
                         source_msg = "  \n  \n***知识库引用***  \n" + sources
                         
                         for c in source_msg:
