@@ -125,7 +125,7 @@ llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_pro
                 azure_endpoint = azure_endpoint,
                 system_prompt=prompt
             ),
-           "Llama3_8B": OpenAI(base_url=llama3_api_base, system_prompt=prompt),
+           "Llama3_8B": OpenAI(api_base=llama3_api_base, api_key="aba", system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
 
@@ -179,14 +179,13 @@ def toggle_rag_use():
     )
     use_rag = True if use_rag=="是" else False
    
-
     if use_rag!= st.session_state.use_rag:
-        st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
+        st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]], system_prompt=prompt)
         if use_rag:
             index, fileToTitleAndUrl = load_data()                
             if index:
                 st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
             else:
                 st.toast("调用飞书知识库失败")
                 use_rag = False
@@ -195,12 +194,12 @@ def toggle_rag_use():
         st.rerun()
     else:
         if "chat_engine" not in st.session_state.keys():
-            st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]])
+            st.session_state.chat_engine = SimpleChatEngine.from_defaults(llm=llm_map[st.session_state["llm"]], system_prompt=prompt)
             if use_rag:
                 index, fileToTitleAndUrl = load_data()                
                 if index:
                     st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
 
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
@@ -267,7 +266,7 @@ def toggle_rag_use():
                         if docs:
                             try:
                                 index = VectorStoreIndex.from_documents(docs)
-                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
+                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
                                 success = True
                             except:
                                 success = False
@@ -291,7 +290,7 @@ def init_chat():
     
     if "messages" not in st.session_state.keys() or len(st.session_state.messages)==0 or st.sidebar.button("清空对话"): # Initialize the chat messages history
         st.session_state.run_id = None
-        st.session_state.chat_engine.reset()
+        #st.session_state.chat_engine.reset()
         st.session_state.messages = []
 
 def starter_prompts():
@@ -315,7 +314,26 @@ def starter_prompts():
                 break
 
     return prompt
+import requests
 
+url = "http://localhost:25121/v1/chat/completions"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer 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"
+}
+data = {
+    "model": "gpt-3.5-turbo",
+    "messages": [
+        {
+            "role": "user",
+            "content": "who made you"
+        }
+    ]
+}
+
+response = requests.post(url, headers=headers, json=data)
+
+print(response.json())
 #@traceable(name=st.session_state.session_id)
 def main():
     '''
@@ -330,7 +348,26 @@ def main():
         "optional_text_label": "Please provide extra information",
     }
     
-    init_chat()
+    init_chat()import requests
+
+url = "http://localhost:25121/v1/chat/completions"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer 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"
+}
+data = {
+    "model": "gpt-3.5-turbo",
+    "messages": [
+        {
+            "role": "user",
+            "content": "who made you"
+        }
+    ]
+}
+
+response = requests.post(url, headers=headers, json=data)
+
+print(response.json())
 
     prompt = ""
     if len(st.session_state.messages)==0 and st.session_state.use_rag:
@@ -373,8 +410,6 @@ def main():
                 response_msg = ""
                 try:
                     if prompt:
-                        print(st.session_state["llm"])
-                        print(Settings.llm)
                         streaming_response = st.session_state.chat_engine.stream_chat(prompt)
                     else:
                         st.rerun()
