@@ -1,6 +1,7 @@
 import os 
-import requests
+import time
 import json
+import requests
 import lark_oapi as lark
 from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
@@ -132,6 +133,104 @@ def getTenantAccessToken(app_id, app_secret):
     lark.logger.info(lark.JSON.marshal(response, indent=4))
     return json.loads(response.raw.content)["tenant_access_token"]
 
+def readSheet(directory, doc_id, option, title):
+    path = f"./{directory}/{title}"
+    sheet_token = doc_id
+    request: QuerySpreadsheetSheetRequest = QuerySpreadsheetSheetRequest.builder() \
+.spreadsheet_token(sheet_token) \
+.build()
+
+    # 发起请求
+    response: QuerySpreadsheetSheetResponse = larkClient.sheets.v3.spreadsheet_sheet.query(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.sheets.v3.spreadsheet_sheet.query failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+    else:
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+        sheets = response.data.sheets
+
+        with pd.ExcelWriter(path, engine='xlsxwriter') as writer:
+            for sheet in sheets:
+                url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
+                headers = {
+                    'Authorization': f'Bearer {tenant_access_token}'
+                }
+
+                response = requests.get(url, headers=headers)
+                if response.status_code==200:
+                    respJson = response.json()
+                    sheet_data = respJson["data"]["valueRange"]["values"]
+                    df = pd.DataFrame(sheet_data)
+                    df.to_excel(writer, sheet_name=sheet.title, index=False)
+                else:
+                    lark.logger.error(
+                    f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}")
+    
+    fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, "sheet")}
+    return fileToTitleAndUrl
+
+def readDoc(directory, doc_id, option, title):
+    path = f"./{directory}/{title}"
+    request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
+            .document_id(doc_id) \
+            .lang(0) \
+            .build()
+
+    # 发起请求
+    response: RawContentDocumentResponse = larkClient.docx.v1.document.raw_content(request, option)
+    if not response.success():
+        lark.logger.error(
+            f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
+    else:
+        path = f"./{directory}/{title}"
+        if not os.path.exists(path):
+            try:
+                with open(path, 'w') as f:
+                    f.write(response.data.content)
+            except:
+                pass
+
+    request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
+    .document_id(doc_id) \
+    .page_size(500) \
+    .document_revision_id(-1) \
+    .build()
+
+    # 发起请求
+    listBlockResponse: ListDocumentBlockResponse = larkClient.docx.v1.document_block.list(request)
+
+    # 处理失败返回
+    if not listBlockResponse.success():
+        lark.logger.error(
+            f"client.docx.v1.document_block.list failed, code: {listBlockResponse.code}, msg: {listBlockResponse.msg}, log_id: {listBlockResponse.get_log_id()}")
+    else:
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
+
+    try:
+        fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, doc_type="docx")}
+    except:
+        print(f'failed {path}')
+    
+    return fileToTitleAndUrl
+
+def readNode(directory, node, tenant_access_token):
+    fileToTitleAndUrl = {}
+    option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
+    doc_id = node["obj_token"]
+    title = node["title"]
+    doc_type = node["obj_type"]
+ 
+    # 发起请求
+    if doc_type=="sheet":
+        fileToTitleAndUrl = readSheet(directory, doc_id, option, title) 
+    elif doc_type=="docx":
+        fileToTitleAndUrl = readDoc(directory, doc_id, option, title) 
+
+    return fileToTitleAndUrl
 
 def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
     for attempt in range(max_retries):
@@ -158,105 +257,87 @@ def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
                 print(f"Failed to load file after {max_retries} attempts: {e}")
                 return
 
+def readUrl(directory, url, tenant_access_token):
+    from urllib.parse import urlparse
+    parsed_url = urlparse(url)
+
+    # Split the path and get the document ID
+    path_parts = parsed_url.path.split('/')
+
+    # Assuming the document ID is always the last part of the path
+    doc_id = path_parts[-1] if path_parts else None
+    print(doc_id)
+
+    fileToTitleAndUrl = {}
+
+    if "sheet" in url:
+        doc_type = "sheet"
+    elif "doc" in url:
+        doc_type = "docx"
+    else: # most likely wiki
+        request: GetNodeSpaceRequest = GetNodeSpaceRequest.builder() \
+        .token(doc_id) \
+        .build()
+
+        # 发起请求
+        response: GetNodeSpaceResponse = larkClient.wiki.v2.space.get_node(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.wiki.v2.space.get_node failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+            return
+
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+        doc_type = response.data.node.obj_type
+        title = response.data.node.title
+        print(doc_type)
+        obj_token = response.data.node.obj_token
+        node = {"obj_token": obj_token, "title": title, "obj_type": doc_type}
+        fileToTitleAndUrl = readNode(directory, node, tenant_access_token)
+
+    '''
+    if doc_type == "docx":
+        # 构造请求对象
+        request: GetDocumentRequest = GetDocumentRequest.builder() \
+            .document_id(doc_id) \
+            .build()
+
+        # 发起请求
+        response: GetDocumentResponse = larkClient.docx.v1.document.get(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
+            return
+
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+        response = larkClient.docx.v1.document.get(request)
+        print(response)
+    elif doc_type == "sheet":
+    '''
+    return fileToTitleAndUrl
 
 async def readWiki(space_id, app_id, app_secret, embed_model):
     tenant_access_token = getTenantAccessToken(app_id, app_secret)
+    option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
     nodes = await get_all_wiki_nodes(space_id, tenant_access_token)
-    directory = "./data"
+    directory = "data"
     if not os.path.exists(directory):
         os.makedirs(directory)
 
     for node in nodes:
-        doc_id = node["obj_token"]
-        title = node["title"]
-        doc_type = node["obj_type"]
+        readNode(directory, node, tenant_access_token)
 
-        # 发起请求
-        option = lark.RequestOption.builder().tenant_access_token(tenant_access_token).build()
-
-        if doc_type=="sheet":
-            sheet_token = doc_id
-            request: QuerySpreadsheetSheetRequest = QuerySpreadsheetSheetRequest.builder() \
-        .spreadsheet_token(sheet_token) \
-        .build()
-
-            # 发起请求
-            response: QuerySpreadsheetSheetResponse = larkClient.sheets.v3.spreadsheet_sheet.query(request)
-
-            # 处理失败返回
-            if not response.success():
-                lark.logger.error(
-                    f"client.sheets.v3.spreadsheet_sheet.query failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-            else:
-                # 处理业务结果
-                lark.logger.info(lark.JSON.marshal(response.data, indent=4))
-                sheets = response.data.sheets
-
-                with pd.ExcelWriter("./data/"+title, engine='xlsxwriter') as writer:
-                    for sheet in sheets:
-                        url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
-                        headers = {
-                            'Authorization': f'Bearer {tenant_access_token}'
-                        }
-
-                        response = requests.get(url, headers=headers)
-                        if response.status_code==200:
-                            respJson = response.json()
-                            sheet_data = respJson["data"]["valueRange"]["values"]
-                            df = pd.DataFrame(sheet_data)
-                            df.to_excel(writer, sheet_name=sheet.title, index=False)
-                        else:
-                            lark.logger.error(
-                            f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}")
-            
-        elif doc_type=="docx":
-            request: RawContentDocumentRequest = RawContentDocumentRequest.builder() \
-            .document_id(doc_id) \
-            .lang(0) \
-            .build()
-
-            # 发起请求
-            response: RawContentDocumentResponse = larkClient.docx.v1.document.raw_content(request, option)
-            if not response.success():
-                lark.logger.error(
-                    f"client.docx.v1.document.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, doc_id: {doc_id}")
-            else:
-                path = "./data/"+title
-                if not os.path.exists(path):
-                    try:
-                        with open(path, 'w') as f:
-                            f.write(response.data.content)
-                    except:
-                        pass
-
-            request: ListDocumentBlockRequest = ListDocumentBlockRequest.builder() \
-            .document_id(doc_id) \
-            .page_size(500) \
-            .document_revision_id(-1) \
-            .build()
-
-            # 发起请求
-            listBlockResponse: ListDocumentBlockResponse = larkClient.docx.v1.document_block.list(request)
-
-            # 处理失败返回
-            if not listBlockResponse.success():
-                lark.logger.error(
-                    f"client.docx.v1.document_block.list failed, code: {listBlockResponse.code}, msg: {listBlockResponse.msg}, log_id: {listBlockResponse.get_log_id()}")
-            else:
-                # 处理业务结果
-                lark.logger.info(lark.JSON.marshal(listBlockResponse.data, indent=4))
-                
-            try:
-                fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, doc_type)}
-            except:
-                print(f'failed {path}')
-    
     # automatically sets the metadata of each document according to filename_fn
     reader = SimpleDirectoryReader(
                 input_dir=directory, 
                 recursive=True, 
-                filename_as_id=True,
                 required_exts = required_exts,
+                filename_as_id=True,
                 file_extractor={".xlsx": CustomExcelReader()}, 
                 file_metadata=lambda filename: {"file_name": filename}
             )

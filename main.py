@@ -20,7 +20,7 @@ from llama_index.llms.azure_openai import AzureOpenAI
 from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
-from readFeishuWiki import readWiki, read_documents, CustomExcelReader, TsvReader
+from readFeishuWiki import readWiki, readUrl, read_documents, CustomExcelReader, TsvReader, getTenantAccessToken
 from S3ops import put_object, upload_file, create_bucket, create_presigned_url, delete_all_objects, delete_bucket, bucket_exists
 
 from streamlit_feedback import streamlit_feedback
@@ -72,6 +72,8 @@ client = lark.Client.builder() \
         .build()
 
 # Initialize session state
+if 'uploaded_url' not in st.session_state:
+    st.session_state.uploaded_url = ""
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
 
@@ -180,6 +182,41 @@ def toggle_rag_use():
 
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
+        uploaded_url = st.sidebar.text_input("飞书文件链接")
+        docs = []
+        directory = st.session_state.session_id
+        if st.session_state.uploaded_url!=uploaded_url:
+            print(uploaded_url)
+            st.session_state.uploaded_url = uploaded_url
+            if uploaded_url:
+                with st.status(label="读取链接中", expanded=False) as status:
+                    tenant_access_token = getTenantAccessToken(app_id, app_secret)
+                    directory = st.session_state.session_id
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+                    resp = readUrl(directory, uploaded_url, tenant_access_token)
+                    reader = SimpleDirectoryReader(
+                        input_dir=directory,
+                        recursive=True,
+                        filename_as_id=True,
+                        file_extractor={".xlsx": CustomExcelReader(), ".tsv": TsvReader()},
+                        file_metadata=lambda filename: {"file_name": filename},
+                        raise_on_error=True
+                    )
+                    docs = reader.load_data()
+                    if docs:
+                        try:
+                            index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+                            st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
+                            success = True
+                        except:
+                            success = False
+
+                    if success:
+                        status.update(label="读取完成", state="complete", expanded=False)
+                    else:
+                        status.update(label="读取失败", state="error", expanded=False)
+
         if st.session_state.uploaded_files!=uploaded_files:
             old_files = [file.name for file in st.session_state.uploaded_files]
             cur_files = [file.name for file in uploaded_files]
@@ -191,7 +228,6 @@ def toggle_rag_use():
                     st.write("上传云端")
                     use_rag = False
 
-                    directory = st.session_state.session_id
                     if st.secrets.aws_region=='us-east-1':
                         region = None
                     else:
@@ -234,7 +270,9 @@ def toggle_rag_use():
                         process.join()
 
                         # Retrieve the result from the queue
-                        docs = queue.get()
+                        uploaded_docs = queue.get()
+                        if uploaded_docs: 
+                            docs.extend(uploaded_docs)
 
                         # Ensure the subprocess is terminated
                         if process.is_alive():
@@ -376,7 +414,7 @@ def main():
                                 else:
                                     file_name = file_path.split("/")[-1]
                                     file_url = ""
-                                source = "[%s](%s): %s" % (file_name, file_url, node.text) + " 相似度" + format(node.score, ".2%") 
+                                source = "[%s](%s)" % (file_name, file_url) + " 相似度" + format(node.score, ".2%") 
                                 
                                 sources.add(source)
                             except Exception as e:
