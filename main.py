@@ -9,19 +9,18 @@ from lark_oapi.api.wiki.v2 import *
 from lark_oapi.api.docx.v1 import *
 from lark_oapi.api.auth.v3 import *
 import streamlit as st
-import openai
 from multiprocessing import Process, Queue, set_start_method
 from functools import partial
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
-from llama_index.core import Settings, SimpleDirectoryReader
+from llama_index.core import Settings, SimpleDirectoryReader, get_response_synthesizer 
 from llama_index.core.chat_engine import SimpleChatEngine
 from llama_index.llms.azure_openai import AzureOpenAI
 from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from llama_index.core.postprocessor import SimilarityPostprocessor
 
-from readFeishuWiki import readWiki, ExcelReader, TsvReader
+from readFeishuWiki import readWiki, read_documents, CustomExcelReader, TsvReader
 from S3ops import put_object, upload_file, create_bucket, create_presigned_url, delete_all_objects, delete_bucket, bucket_exists
 
 from streamlit_feedback import streamlit_feedback
@@ -29,12 +28,13 @@ from langsmith.run_helpers import get_current_run_tree
 from langchain_core.tracers.context import tracing_v2_enabled
 #from langsmith import Client, traceable
 
+Settings.chunk_size = 256
+
 title = "AI assistant, powered by Qingcheng knowledge"
 st.set_page_config(page_title=title, page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
 
 llama3_api_base = "http://localhost:25121/v1"
 openai_api_base = "http://vasi.chitu.ai/v1"
-os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
 
 os.environ["AWS_ACCESS_KEY_ID"] = st.secrets.aws_access_key
 os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets.aws_secret_key
@@ -53,6 +53,14 @@ azure_endpoint = st.secrets.azure_endpoint
 azure_chat_deployment = st.secrets.azure_chat_deployment
 azure_embedding_deployment = st.secrets.azure_embedding_deployment
 
+embed_model = AzureOpenAIEmbedding(
+    model="text-embedding-ada-002",
+    deployment_name=azure_embedding_deployment,
+    api_key=azure_api_key,
+    azure_endpoint=azure_endpoint,
+    api_version=api_version,
+)
+
 app_id = st.secrets.feishu_app_id
 app_secret = st.secrets.feishu_app_secret
 space_id = st.secrets.feishu_space_id
@@ -62,7 +70,6 @@ client = lark.Client.builder() \
         .app_id(app_id) \
         .app_secret(app_secret) \
         .build()
-        
 
 # Initialize session state
 if 'uploaded_files' not in st.session_state:
@@ -71,8 +78,7 @@ if 'uploaded_files' not in st.session_state:
 if 'session_id' not in st.session_state or not st.session_state.session_id:
     st.session_state['session_id'] = str(uuid.uuid4())
 
-prompt = "You are an expert ai infra analyst at 清程极智. Use your knowledge base to answer questions about ai model/hardware performance. Show URLs of your sources whenever possible"
-openai.api_key = st.secrets.openai_key
+prompt = "You are an expert ai infra analyst at 清程极智. Use your knowledge base to answer questions about ai model/hardware performance. After each line, show URL of your source and provide a confidence score"
 
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
 os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
@@ -99,21 +105,15 @@ def load_data():
     with st.spinner(text="Loading and indexing the docs – hang tight! This should take 1-2 minutes."):
         app_id = st.secrets.feishu_app_id
         app_secret = st.secrets.feishu_app_secret
-        embed_model = AzureOpenAIEmbedding(
-            model="text-embedding-ada-002",
-            deployment_name=azure_embedding_deployment,
-            api_key=azure_api_key,
-            azure_endpoint=azure_endpoint,
-            api_version=api_version,
-        )
         index, fileToTitleAndUrl = asyncio.run(readWiki(space_id, app_id, app_secret, embed_model))
         
         return index, fileToTitleAndUrl 
-  
+ 
 llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_prompt=prompt), 
            "gpt4o": AzureOpenAI(model="gpt-4o", 
-               system_prompt=prompt,
+                system_prompt=prompt,
                 engine=azure_chat_deployment,
+                temperature=0,
                 api_key=azure_api_key,  
                 api_version=api_version,
                 azure_endpoint = azure_endpoint,
@@ -128,46 +128,23 @@ llm_map = {"Claude3.5": Anthropic(model="claude-3-5-sonnet-20240620", system_pro
            "Llama3_8B": OpenAI(api_base=llama3_api_base, api_key="aba", system_prompt=prompt),
            "ollama": Ollama(model="llama2", request_timeout=60.0)
 }
+llm = "gpt4o"
+response_synthesizer = get_response_synthesizer(llm=llm_map[llm], response_mode="compact")
 
 def toggle_llm():
     llm = st.sidebar.selectbox(
         "模型切换",
         ("gpt4o", "Claude3.5", "Llama3_8B")
     )
-    os.environ["OPENAI_API_KEY"] = st.secrets.openai_key
+    response_synthesizer = get_response_synthesizer(llm=llm_map[llm], response_mode="compact")
     if llm=="Llama3_8B": 
         os.environ["OPENAI_API_BASE"] = llama3_api_base
-    else:
-        os.environ["OPENAI_API_BASE"] = openai_api_base
     
     if llm!=st.session_state["llm"]:
         st.session_state["llm"] = llm
         Settings.llm = llm_map[llm]
         st.toast(f'Switched to {llm}')
 
-def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
-    for attempt in range(max_retries):
-        try:
-            reader = SimpleDirectoryReader(
-                input_dir=directory,
-                fs=s3fs,
-                recursive=True,
-                filename_as_id=True,
-                file_extractor={".xlsx": ExcelReader(), ".tsv": TsvReader()},
-                file_metadata=lambda filename: {"file_name": filename},
-                raise_on_error=True
-            )
-            docs = reader.load_data()
-            queue.put(docs)
-            return  # Exit the function if successful
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"File not loaded, retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(retry_delay)
-            else:
-                queue.put(None)
-                print(f"Failed to load file after {max_retries} attempts: {e}")
-                return
 
 def toggle_rag_use():
     
@@ -185,7 +162,7 @@ def toggle_rag_use():
             index, fileToTitleAndUrl = load_data()                
             if index:
                 st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
+                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], response_synthesizer=response_synthesizer, streaming=True)
             else:
                 st.toast("调用飞书知识库失败")
                 use_rag = False
@@ -199,7 +176,7 @@ def toggle_rag_use():
                 index, fileToTitleAndUrl = load_data()                
                 if index:
                     st.session_state.fileToTitleAndUrl = fileToTitleAndUrl 
-                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
+                    st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
 
     if not use_rag:
         uploaded_files = st.sidebar.file_uploader(label="上传临时文件", accept_multiple_files=True)
@@ -265,8 +242,8 @@ def toggle_rag_use():
 
                         if docs:
                             try:
-                                index = VectorStoreIndex.from_documents(docs)
-                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], system_prompt=prompt, streaming=True)
+                                index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+                                st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
                                 success = True
                             except:
                                 success = False
@@ -314,26 +291,7 @@ def starter_prompts():
                 break
 
     return prompt
-import requests
 
-url = "http://localhost:25121/v1/chat/completions"
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer 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"
-}
-data = {
-    "model": "gpt-3.5-turbo",
-    "messages": [
-        {
-            "role": "user",
-            "content": "who made you"
-        }
-    ]
-}
-
-response = requests.post(url, headers=headers, json=data)
-
-print(response.json())
 #@traceable(name=st.session_state.session_id)
 def main():
     '''
@@ -348,26 +306,7 @@ def main():
         "optional_text_label": "Please provide extra information",
     }
     
-    init_chat()import requests
-
-url = "http://localhost:25121/v1/chat/completions"
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer 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"
-}
-data = {
-    "model": "gpt-3.5-turbo",
-    "messages": [
-        {
-            "role": "user",
-            "content": "who made you"
-        }
-    ]
-}
-
-response = requests.post(url, headers=headers, json=data)
-
-print(response.json())
+    init_chat()
 
     prompt = ""
     if len(st.session_state.messages)==0 and st.session_state.use_rag:
@@ -423,28 +362,37 @@ print(response.json())
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
                     source_nodes = streaming_response.source_nodes
                     filtered_nodes = processor.postprocess_nodes(source_nodes)
-                    sources = set()
-                    for node in source_nodes:
-                        try:
-                            if "file_path" in node.metadata:
-                                file_path = node.metadata["file_path"]
-                            else:
-                                file_path = node.metadata["file_name"]
-                            file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
-                            file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
-                            source = "[%s](%s)中某部分相似度" % (file_name, file_url) + format(node.score, ".2%") 
-                            sources.add(source)
-                        except Exception as e:
-                            # no source wiki node
-                            print(e)
-                            pass
-                    if sources: 
+                    if source_nodes:
+                        sources = set()
+                        for node in source_nodes:
+                            try:
+                                if "file_path" in node.metadata:
+                                    file_path = node.metadata["file_path"]
+                                else:
+                                    file_path = node.metadata["file_name"]
+                                if file_path in st.session_state.fileToTitleAndUrl:
+                                    file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
+                                    file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
+                                else:
+                                    file_name = file_path.split("/")[-1]
+                                    file_url = ""
+                                source = "[%s](%s): %s" % (file_name, file_url, node.text) + " 相似度" + format(node.score, ".2%") 
+                                
+                                sources.add(source)
+                            except Exception as e:
+                                # no source wiki node
+                                print(st.session_state.fileToTitleAndUrl)
+                                print(e)
+                                pass
+                        
                         sources = "  \n".join(sources)
-                        source_msg = "  \n  \n***知识库引用***  \n" + sources
+                        source_msg = "  \n  \n***知识库引用***" + sources
                         
                         for c in source_msg:
                             response_msg += c
                             response_container.write(response_msg)
+                
+                        #st.markdown(list(sources))
                 
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history

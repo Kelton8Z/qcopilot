@@ -21,7 +21,24 @@ import chromadb
 collection = "qcWiki"
 chroma_db_path = "chroma_db"
 fileToTitleAndUrl = {}
+required_exts = [".py", ".md", ".txt", ".docx", ".json", ".tsv", ".csv", ".ppt", ".pptx", ".xlsx"]
 
+class CustomExcelReader(BaseReader):
+    def load_data(self, filename: str, extra_info: dict = None):
+        df = pd.read_excel(filename, sheet_name=None)
+        sentences = []
+        # if {'Model', 'Input Length', 'Output Length', 'Batch Size', 'Latency'}.issubset(df.columns):
+        for sheetname, sheet in df.items():
+            cols = sheet.columns
+            for row in sheet.itertuples(index=False, name=None):
+                sentence = f"For {sheetname}, "
+                for cell, col in zip(row, cols):
+                    if pd.notna(cell):
+                        sentence += f'{col} is {cell}, '
+
+                sentences.append(sentence)
+
+        return [Document(text=sentence, metadata=extra_info) for sentence in sentences]
 
 class TsvReader(BaseReader):
     def load_data(self, file_path: str, extra_info: dict = None):
@@ -114,6 +131,32 @@ def getTenantAccessToken(app_id, app_secret):
     # 处理业务结果
     lark.logger.info(lark.JSON.marshal(response, indent=4))
     return json.loads(response.raw.content)["tenant_access_token"]
+
+
+def read_documents(directory, s3fs, queue, max_retries=5, retry_delay=2):
+    for attempt in range(max_retries):
+        try:
+            reader = SimpleDirectoryReader(
+                input_dir=directory,
+                fs=s3fs,
+                recursive=True,
+                filename_as_id=True,
+                required_exts = required_exts,
+                file_extractor={".xlsx": CustomExcelReader(), ".tsv": TsvReader()},
+                file_metadata=lambda filename: {"file_name": filename},
+                raise_on_error=True
+            )
+            docs = reader.load_data()
+            queue.put(docs)
+            return  # Exit the function if successful
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"File not loaded, retrying in {retry_delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                queue.put(None)
+                print(f"Failed to load file after {max_retries} attempts: {e}")
+                return
 
 
 async def readWiki(space_id, app_id, app_secret, embed_model):
@@ -213,7 +256,8 @@ async def readWiki(space_id, app_id, app_secret, embed_model):
                 input_dir=directory, 
                 recursive=True, 
                 filename_as_id=True,
-                file_extractor={".xlsx": ExcelReader()}, 
+                required_exts = required_exts,
+                file_extractor={".xlsx": CustomExcelReader()}, 
                 file_metadata=lambda filename: {"file_name": filename}
             )
     docs = reader.load_data()
