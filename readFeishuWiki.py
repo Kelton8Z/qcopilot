@@ -152,22 +152,39 @@ def readSheet(directory, doc_id, option, title):
         lark.logger.info(lark.JSON.marshal(response.data, indent=4))
         sheets = response.data.sheets
 
-        with pd.ExcelWriter(path, engine='xlsxwriter') as writer:
-            for sheet in sheets:
-                url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
-                headers = {
-                    'Authorization': f'Bearer {tenant_access_token}'
-                }
+        # with pd.ExcelWriter(path+".xlsx", engine='xlsxwriter') as writer:
+        #     for sheet in sheets:
+        #         url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
+        #         headers = {
+        #             'Authorization': f'Bearer {option.tenant_access_token}'
+        #         }
 
-                response = requests.get(url, headers=headers)
-                if response.status_code==200:
-                    respJson = response.json()
-                    sheet_data = respJson["data"]["valueRange"]["values"]
-                    df = pd.DataFrame(sheet_data)
-                    df.to_excel(writer, sheet_name=sheet.title, index=False)
-                else:
-                    lark.logger.error(
-                    f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}")
+        #         response = requests.get(url, headers=headers)
+        #         if response.status_code==200:
+        #             respJson = response.json()
+        #             sheet_data = respJson["data"]["valueRange"]["values"]
+        #             df = pd.DataFrame(sheet_data)
+        #             df.to_excel(writer, sheet_name=sheet.title, index=False)
+        #         else:
+        #             lark.logger.error(
+        #             f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}")
+        for sheet in sheets:
+            url = f'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{sheet_token}/values/{sheet.sheet_id}'
+            headers = {
+                'Authorization': f'Bearer {option.tenant_access_token}'
+            }
+
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                respJson = response.json()
+                sheet_data = respJson["data"]["valueRange"]["values"]
+                df = pd.DataFrame(sheet_data)
+                df.to_csv(f"{path}_{sheet.title}.csv", index=False)
+            else:
+                lark.logger.error(
+                    f"Getting sheet from {url} failed, code: {response.status_code}, msg: {response.text}"
+                )
+
     
     fileToTitleAndUrl[os.path.abspath(path)] = {"title": title, "url": getUrl(larkClient, doc_id, "sheet")}
     return fileToTitleAndUrl
