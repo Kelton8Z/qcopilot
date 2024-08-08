@@ -425,14 +425,15 @@ def main():
                                 print(e)
                                 pass
                         
-                        sources = "  \n".join(sources)
-                        source_msg = "  \n  \n***知识库引用***  \n" + sources
-                        
-                        for c in source_msg:
-                            response_msg += c
-                            response_container.write(response_msg)
-                
-                        #st.markdown(list(sources))
+                        if sources: 
+                            sources = "  \n".join(sources)
+                            source_msg = "  \n  \n***知识库引用***  \n" + sources
+                            
+                            for c in source_msg:
+                                response_msg += c
+                                response_container.write(response_msg)
+                    
+                            #st.markdown(list(sources))
                 
                 message = {"role": "assistant", "content": response_msg}
                 st.session_state.messages.append(message) # Add response to message history
