@@ -245,7 +245,8 @@ def toggle_rag_use():
                             filepath = directory+"/"+filename
                             bytes_data = file.read()
                             put_object(obj=bytes_data, bucket=directory, key=filename)
-                            s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                            #s3_url = create_presigned_url(bucket_name=directory, object_name=filename)
+                            s3_url = ""
                             st.session_state.fileToTitleAndUrl[filepath] = {"title": filename, "url": s3_url}
                     
                         st.write("向量索引")    
@@ -408,13 +409,14 @@ def main():
                                     file_path = node.metadata["file_path"]
                                 else:
                                     file_path = node.metadata["file_name"]
-                                if file_path in st.session_state.fileToTitleAndUrl:
+                        
+                                file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
+                                if file_url and file_path in st.session_state.fileToTitleAndUrl:
                                     file_name = st.session_state.fileToTitleAndUrl[file_path]["title"]
-                                    file_url = st.session_state.fileToTitleAndUrl[file_path]["url"]
+                                    source = "[%s](%s)" % (file_name, file_url) #+ " 相似度" + format(node.score, ".2%") 
                                 else:
                                     file_name = file_path.split("/")[-1]
-                                    file_url = ""
-                                source = "[%s](%s)" % (file_name, file_url) + " 相似度" + format(node.score, ".2%") 
+                                    source = "%s" % file_name #+ " 相似度" + format(node.score, ".2%") 
                                 
                                 sources.add(source)
                             except Exception as e:
@@ -424,7 +426,7 @@ def main():
                                 pass
                         
                         sources = "  \n".join(sources)
-                        source_msg = "  \n  \n***知识库引用***" + sources
+                        source_msg = "  \n  \n***知识库引用***  \n" + sources
                         
                         for c in source_msg:
                             response_msg += c
