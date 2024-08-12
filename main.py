@@ -26,7 +26,7 @@ from S3ops import put_object, upload_file, create_bucket, create_presigned_url, 
 from streamlit_feedback import streamlit_feedback
 from langsmith.run_helpers import get_current_run_tree
 from langchain_core.tracers.context import tracing_v2_enabled
-#from langsmith import Client, traceable
+from langsmith import Client, traceable
 
 Settings.chunk_size = 256
 
@@ -39,13 +39,11 @@ openai_api_base = "http://vasi.chitu.ai/v1"
 os.environ["AWS_ACCESS_KEY_ID"] = st.secrets.aws_access_key
 os.environ["AWS_SECRET_ACCESS_KEY"] = st.secrets.aws_secret_key
 
-os.environ["LANGCHAIN_PROJECT"] = "July"
+os.environ["LANGCHAIN_PROJECT"] = "august"
 os.environ["LANGCHAIN_TRACING_V2"] = "true" 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = st.secrets.langsmith_key
-
-langsmith_project_id = st.secrets.langsmith_project_id
-#langsmith_client = Client(api_key=langchain_api_key)
+langsmith_client = Client(api_key=langchain_api_key)
 
 api_version="2024-02-01"
 azure_api_key = st.secrets.azure_api_key
@@ -86,21 +84,20 @@ os.environ["ANTHROPIC_API_KEY"] = st.secrets.claude_key
 os.environ["JINAAI_API_KEY"] = st.secrets.jinaai_key
 
 st.title(title)
-_ = '''    
+
 def _submit_feedback(user_response, emoji=None, run_id=None):
     feedback = user_response['score']
     feedback_text = user_response['text']
-    # st.toast(f"Feedback submitted: {feedback}", icon=emoji)
+    st.toast(f"Feedback submitted: {feedback}", icon=emoji)
     messages = st.session_state.messages
     if len(messages)>1:
         langsmith_client.create_feedback(
             run_id,
             key="user-score",
             score=0.0 if feedback=="👎" else 1.0,
-            comment=f'{messages[-2]["content"]} + {messages[-1]["content"]} -> ' + feedback_text if feedback_text else "",
+            comment=feedback_text,
         )
     return user_response
-'''
 
 @st.cache_resource(show_spinner=False)
 def load_data():
@@ -331,13 +328,15 @@ def starter_prompts():
 
     return prompt
 
-#@traceable(name=st.session_state.session_id)
-def main():
-    '''
+@traceable(run_type="llm", name=st.session_state.session_id)
+def call_llm(prompt):
     run = get_current_run_tree()
     run_id = str(run.id)
     st.session_state.run_id = st.session_state["run_0"] = run_id
-    '''
+    streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+    return streaming_response, run_id
+
+def main():
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
 
     feedback_kwargs = {
@@ -362,13 +361,17 @@ def main():
         st.session_state.messages.append({"role": "user", "content": prompt})        
 
     # Display the prior chat messages
-    for i, message in enumerate(st.session_state.messages): 
+    for message in st.session_state.messages: 
         with st.chat_message(message["role"]):
             st.write(message["content"])
-            
-        _ = ''' 
+    
+
+    if st.session_state.messages:
+        message = st.session_state.messages[-1]
         if message["role"]=="assistant":
+            i = len(st.session_state.messages)-1
             feedback_key = f"feedback_{int(i/2)}"
+            print(f'committing {feedback_key} and {st.session_state[f"run_{int(i/2)}"]}')
             # This actually commits the feedback
             streamlit_feedback(
                 **feedback_kwargs,
@@ -377,10 +380,7 @@ def main():
                     _submit_feedback, run_id=st.session_state[f"run_{int(i/2)}"]
                 ),
             )
-        '''
 
-    if st.session_state.messages:
-        message = st.session_state.messages[-1]
         # If last message is not from assistant, generate a new response
         if message["role"] != "assistant":
             with st.chat_message("assistant"):
@@ -388,7 +388,7 @@ def main():
                 response_msg = ""
                 try:
                     if prompt:
-                        streaming_response = st.session_state.chat_engine.stream_chat(prompt)
+                        streaming_response, run_id = call_llm(prompt)
                     else:
                         st.rerun()
                 except:
@@ -439,9 +439,9 @@ def main():
                 st.session_state.messages.append(message) # Add response to message history
                 
                 # log nonnull converstaion to langsmith
-                _ = '''if prompt and response_msg:
+                if prompt and response_msg:
                     print(f'{prompt} -> {response_msg}')
-                    requests.patch(
+                    resp = requests.patch(
                         f"https://api.smith.langchain.com/runs/{run_id}",
                         json={
                             "name": st.session_state.session_id,
@@ -450,17 +450,17 @@ def main():
                         },
                         headers={"x-api-key": langchain_api_key},
                     )
-                ''' 
+                    print(resp)
+                    print(dir(resp))
                 # st.rerun()
-                _ = '''
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
                         (len(st.session_state.messages) - 1) / 2
                     )
-                    st.session_state[f"run_{feedback_index}"] = run.id
+                    st.session_state[f"run_{feedback_index}"] = run_id
                     run = cb.latest_run
                     streamlit_feedback(**feedback_kwargs, key=f"feedback_{feedback_index}")
-                '''
+            
             # clear starter prompts upon convo
             if len(st.session_state.messages)==2:
                 st.rerun()
