@@ -183,7 +183,6 @@ def toggle_rag_use():
         docs = []
         directory = st.session_state.session_id
         if st.session_state.uploaded_url!=uploaded_url:
-            print(uploaded_url)
             st.session_state.uploaded_url = uploaded_url
             if uploaded_url:
                 with st.status(label="读取链接中", expanded=False) as status:
@@ -371,7 +370,6 @@ def main():
         if message["role"]=="assistant":
             i = len(st.session_state.messages)-1
             feedback_key = f"feedback_{int(i/2)}"
-            print(f'committing {feedback_key} and {st.session_state[f"run_{int(i/2)}"]}')
             # This actually commits the feedback
             streamlit_feedback(
                 **feedback_kwargs,
@@ -440,8 +438,7 @@ def main():
                 
                 # log nonnull converstaion to langsmith
                 if prompt and response_msg:
-                    print(f'{prompt} -> {response_msg}')
-                    resp = requests.patch(
+                    requests.patch(
                         f"https://api.smith.langchain.com/runs/{run_id}",
                         json={
                             "name": st.session_state.session_id,
@@ -450,8 +447,6 @@ def main():
                         },
                         headers={"x-api-key": langchain_api_key},
                     )
-                    print(resp)
-                    print(dir(resp))
                 # st.rerun()
                 with tracing_v2_enabled(os.environ["LANGCHAIN_PROJECT"]) as cb:
                     feedback_index = int(
