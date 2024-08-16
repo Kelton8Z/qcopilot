@@ -42,7 +42,9 @@ class CustomExcelReader(BaseReader):
             if sheets:
                 sheetIDs = [sheet.sheet_id for sheet in sheets] 
                 sheetNames = [sheet.title for sheet in sheets] 
-                assert(sheetNames==df.keys())
+                if sheetNames!=list(df.keys()):
+                    print(f'{sheetNames} vs {df.keys()}')
+                    assert(False)
         
         # if {'Model', 'Input Length', 'Output Length', 'Batch Size', 'Latency'}.issubset(df.columns):
         for (sheetname, sheet), sheetID in zip(df.items(), sheetIDs):
@@ -120,7 +122,8 @@ llm_map = {"gpt4o": AzureOpenAI(model="gpt-4o",
             ),
 }
 llm = llm_map["gpt4o"]
-response_synthesizer = get_response_synthesizer(llm=llm, response_mode="compact", structured_answer_filtering=True)
+response_synthesizer = get_response_synthesizer(llm=llm, response_mode="refine", structured_answer_filtering=True)
+# custom_response_synthesizer = 
 # compact/refine with structured_answer_filtering=True to filter out any input nodes that are not relevant to the question being asked.
 
 def main():
@@ -151,53 +154,50 @@ def main():
     )
 
     docs = reader.load_data()
-    index = VectorStoreIndex([])
+    
     if docs:
         try:
             index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
-            # st.session_state.chat_engine = index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
+            query_engine = index.as_query_engine(response_synthesizer=response_synthesizer, response_mode="refine")
+            from llama_index.core import PromptTemplate, SelectorPromptTemplate
+            
+            refine_prompt = PromptTemplate(
+                """\
+                    The original query is as follows: {query_str}
+                    We have provided an existing answer: {existing_answer}
+                    We have the opportunity to refine the existing answer \
+                    (only if needed) with some more context below.
+                    ------------
+                    {context_msg}
+                    ------------
+                    Given the new context, refine the original answer to better answer the query. \
+                    If the context isn't useful, return the original answer.
+                    If data retrieval or analysis is involved, right after each retrieved data show the source table and location of data within, i.e. keep the location data as in Throughput（requests/s) is 24.15 (Location: [<sheetname>](<sheet_url>) D13).
+                    Refined Answer: \
+                """
+            )
+            # print(f'before {query_engine.get_prompts()}\n')
+            query_engine.update_prompts(
+                {"response_synthesizer:refine_template": refine_prompt}
+            )
+            from llama_index.core.chat_engine import CondenseQuestionChatEngine
+            st.session_state.chat_engine = CondenseQuestionChatEngine.from_defaults(query_engine=query_engine) #index.as_chat_engine(chat_mode="condense_question", llm=llm_map[st.session_state["llm"]], streaming=True)
             success = True
         except:
             success = False
 
-    query_engine = index.as_query_engine(response_mode="no_text")
-    query = "what is llama3 8b's throughput"
-    resp = query_engine.query(query)
+    # print(f'after {query_engine.get_prompts()}\n')
+    query = "what is llama3 8b's throughput when running trtllm"
+    # resp = query_engine.query(query)
+    resp = st.session_state.chat_engine.chat(query)
     # sys.stdout = original_stdout
-
+    print(resp)
     sources = resp.source_nodes
     
-    from llama_index.core import PromptTemplate
-    qa_prompt = PromptTemplate(
-        """\
-    Context information is below.
-    ---------------------
-    {context_str}
-    ---------------------
-    Given the context information and not prior knowledge, answer the query.
-    Query: {query_str}
-    Answer: \
-    """
-    )
-    
-    refine_prompt = PromptTemplate(
-        """\
-    The original query is as follows: {query_str}
-    We have provided an existing answer: {existing_answer}
-    We have the opportunity to refine the existing answer \
-    (only if needed) with some more context below.
-    ------------
-    {context_str}
-    ------------
-    Given the new context, refine the original answer to better answer the query. \
-    If the context isn't useful, return the original answer.
-    If data retrieval or analysis is involved, show the source table and location of data within, i.e. keep the location data as in Throughput（requests/s) is 24.15 (Location: D13).
-    Refined Answer: \
-    """
-    )
-    from customResponseSynthesis import generate_response_cr
-    cr_resp, fmt_prompts = generate_response_cr(sources, query, qa_prompt, refine_prompt, llm)
-    print(f'answer {cr_resp}')
-    print(f'intermediates {fmt_prompts}')
+    # from customResponseSynthesis import generate_response_cr
+    # cr_resp, fmt_prompts = generate_response_cr(sources, query, qa_prompt, refine_prompt, llm)
+    # print(f'answer {cr_resp}')
+    # print(f'intermediates {fmt_prompts}')
+
     
 main()
