@@ -327,13 +327,17 @@ def starter_prompts():
 
     return prompt
 
+map = {}
 @traceable(run_type="llm", name=st.session_state.session_id)
-def call_llm(prompt):
+def log_trace(prompt):
     run = get_current_run_tree()
     run_id = str(run.id)
     st.session_state.run_id = st.session_state["run_0"] = run_id
+    return map[prompt], run_id
+
+def call_llm(prompt):
     streaming_response = st.session_state.chat_engine.stream_chat(prompt)
-    return streaming_response, run_id
+    return streaming_response
 
 def main():
     feedback_option = "faces" if st.toggle(label="`Thumbs` ⇄ `Faces`", value=False) else "thumbs"
@@ -384,16 +388,21 @@ def main():
             with st.chat_message("assistant"):
                 response_container = st.empty()  # Container to hold the response as it streams
                 response_msg = ""
-                try:
-                    if prompt:
-                        streaming_response, run_id = call_llm(prompt)
-                    else:
-                        st.rerun()
-                except:
+                
+                if prompt:
+                    streaming_response = call_llm(prompt)
+                else:
                     st.rerun()
+                
                 for token in streaming_response.response_gen:
                     response_msg += token
                     response_container.write(response_msg)
+            
+                try:
+                    map[prompt] = response_msg
+                    _, run_id = log_trace(prompt)
+                except:
+                    st.rerun()
                 
                 if st.session_state.use_rag or st.session_state.uploaded_files:
                     processor = SimilarityPostprocessor(similarity_cutoff=0.25)
